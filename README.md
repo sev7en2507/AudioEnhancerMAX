@@ -113,7 +113,7 @@ Unlike cloud-based tools (Adobe Podcast, Descript, Auphonic), AudioEnhancerMAX r
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/AudioEnhancerMAX.git
+git clone https://github.com/sev7en2507/AudioEnhancerMAX.git
 cd AudioEnhancerMAX
 
 # Install dependencies
@@ -239,8 +239,8 @@ See [Edge Computing Setup Guide](docs/edge-computing.md) for details.
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-- 🐛 [Report a Bug](https://github.com/yourusername/AudioEnhancerMAX/issues/new?template=bug_report.md)
-- 💡 [Request a Feature](https://github.com/yourusername/AudioEnhancerMAX/issues/new?template=feature_request.md)
+- 🐛 [Report a Bug](https://github.com/sev7en2507/AudioEnhancerMAX/issues/new?template=bug_report.md)
+- 💡 [Request a Feature](https://github.com/sev7en2507/AudioEnhancerMAX/issues/new?template=feature_request.md)
 - 🌍 [Help Translate](docs/translation.md)
 
 ---

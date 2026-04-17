@@ -6,7 +6,7 @@ Thank you for considering contributing to AudioEnhancerMAX! 🎙️
 
 ### 🐛 Reporting Bugs
 
-1. Check existing [Issues](https://github.com/yourusername/AudioEnhancerMAX/issues) to avoid duplicates.
+1. Check existing [Issues](https://github.com/sev7en2507/AudioEnhancerMAX/issues) to avoid duplicates.
 2. Open a new issue using the **Bug Report** template.
 3. Include: OS, Python version, steps to reproduce, expected vs actual behavior, audio sample if possible.
 
@@ -59,7 +59,7 @@ AudioEnhancerMAX supports English and Italian. To add a new language:
 
 ```bash
 # Clone and setup
-git clone https://github.com/yourusername/AudioEnhancerMAX.git
+git clone https://github.com/sev7en2507/AudioEnhancerMAX.git
 cd AudioEnhancerMAX
 pip install -r requirements.txt
 
