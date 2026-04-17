@@ -37,7 +37,10 @@ python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
 
 pip install --upgrade pip
-pip install fastapi uvicorn soundfile noisereduce psutil httpx
+pip install fastapi uvicorn soundfile noisereduce httpx
+
+# psutil doesn't support Android — skip it (worker has fallbacks)
+pip install psutil 2>/dev/null || echo "⚠ psutil not available on Android (using /proc fallback)"
 
 # Try pedalboard (may fail on some ARM devices)
 pip install pedalboard 2>/dev/null || echo "⚠ pedalboard not available on this device (DSP will use fallback)"
