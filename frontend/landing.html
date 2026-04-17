@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AudioEnhancerMAX by Fd — The Open-Source Audio Media Center</title>
+    <meta name="description" content="AudioEnhancerMAX: professional-grade AI audio processing suite. 16+ filters, edge computing, Gemma 4 AI intelligence. 100% local, 100% free.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #08080c;
+            --bg-secondary: #0f0f18;
+            --bg-card: #12121e;
+            --bg-card-hover: #1a1a2e;
+            --accent: #7c3aed;
+            --accent-glow: rgba(124, 58, 237, 0.3);
+            --accent-light: #a78bfa;
+            --accent-2: #06b6d4;
+            --accent-3: #f59e0b;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --text-primary: #f1f1f6;
+            --text-secondary: #94949e;
+            --text-dim: #5c5c6e;
+            --border: rgba(255, 255, 255, 0.06);
+            --glass: rgba(255, 255, 255, 0.03);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* ── HERO ────────────────────────── */
+        .hero {
+            position: relative;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 4rem 2rem;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -30%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;
+            height: 800px;
+            background: radial-gradient(circle, var(--accent-glow) 0%, transparent 60%);
+            animation: pulse-glow 4s ease-in-out infinite alternate;
+            z-index: 0;
+        }
+
+        @keyframes pulse-glow {
+            0% { opacity: 0.3; transform: translateX(-50%) scale(1); }
+            100% { opacity: 0.6; transform: translateX(-50%) scale(1.15); }
+        }
+
+        .hero-content { position: relative; z-index: 1; max-width: 900px; }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 16px;
+            background: rgba(124, 58, 237, 0.12);
+            border: 1px solid rgba(124, 58, 237, 0.25);
+            border-radius: 999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--accent-light);
+            margin-bottom: 2rem;
+            letter-spacing: 0.5px;
+        }
+
+        .hero h1 {
+            font-size: clamp(2.8rem, 6vw, 5.5rem);
+            font-weight: 900;
+            line-height: 1.05;
+            letter-spacing: -0.03em;
+            margin-bottom: 1.5rem;
+        }
+
+        .hero h1 .gradient {
+            background: linear-gradient(135deg, var(--accent-light), var(--accent-2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero p.subtitle {
+            font-size: 1.25rem;
+            color: var(--text-secondary);
+            max-width: 700px;
+            margin: 0 auto 2.5rem;
+            line-height: 1.7;
+        }
+
+        .hero-cta {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 14px 32px;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            text-decoration: none;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent), #9333ea);
+            color: white;
+            box-shadow: 0 4px 24px var(--accent-glow);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.5);
+        }
+
+        .btn-outline {
+            background: transparent;
+            color: var(--text-primary);
+            border: 1px solid rgba(255,255,255,0.15);
+        }
+
+        .btn-outline:hover {
+            background: rgba(255,255,255,0.05);
+            border-color: rgba(255,255,255,0.3);
+        }
+
+        /* ── LANG TOGGLE ─────────────────── */
+        .lang-toggle {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            z-index: 100;
+            display: flex;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            backdrop-filter: blur(20px);
+        }
+
+        .lang-btn {
+            padding: 8px 16px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .lang-btn.active {
+            background: var(--accent);
+            color: white;
+        }
+
+        /* ── SECTIONS ────────────────────── */
+        section {
+            padding: 6rem 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .section-header {
+            text-align: center;
+            margin-bottom: 4rem;
+        }
+
+        .section-header h2 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            margin-bottom: 1rem;
+            letter-spacing: -0.02em;
+        }
+
+        .section-header p {
+            color: var(--text-secondary);
+            max-width: 600px;
+            margin: 0 auto;
+            font-size: 1.05rem;
+        }
+
+        /* ── STATS BAR ───────────────────── */
+        .stats-bar {
+            display: flex;
+            justify-content: center;
+            gap: 3rem;
+            padding: 3rem 2rem;
+            margin: -2rem auto 4rem;
+            max-width: 900px;
+            flex-wrap: wrap;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2.4rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--accent-light), var(--accent-2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 4px;
+        }
+
+        /* ── MODULE GRID ─────────────────── */
+        .module-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .module-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 28px;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .module-card:hover {
+            background: var(--bg-card-hover);
+            border-color: rgba(124, 58, 237, 0.2);
+            transform: translateY(-3px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+        }
+
+        .module-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+            margin-bottom: 16px;
+        }
+
+        .module-card h3 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .module-card p {
+            font-size: 0.88rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        .module-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 12px;
+        }
+
+        .tag-ai { background: rgba(124, 58, 237, 0.15); color: var(--accent-light); }
+        .tag-dsp { background: rgba(6, 182, 212, 0.15); color: var(--accent-2); }
+        .tag-new { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); }
+        .tag-edge { background: rgba(245, 158, 11, 0.15); color: var(--accent-3); }
+
+        /* ── COMPARISON TABLE ────────────── */
+        .comparison-wrapper {
+            overflow-x: auto;
+            margin-top: 2rem;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+        }
+
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+        }
+
+        .comparison-table thead {
+            background: var(--bg-card);
+        }
+
+        .comparison-table th {
+            padding: 16px 20px;
+            text-align: left;
+            font-weight: 700;
+            border-bottom: 1px solid var(--border);
+            white-space: nowrap;
+        }
+
+        .comparison-table th:first-child {
+            min-width: 220px;
+        }
+
+        .comparison-table th.aemax {
+            background: linear-gradient(135deg, rgba(124, 58, 237, 0.15), rgba(6, 182, 212, 0.08));
+            color: var(--accent-light);
+        }
+
+        .comparison-table td {
+            padding: 14px 20px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+
+        .comparison-table tr:hover td {
+            background: rgba(255, 255, 255, 0.015);
+        }
+
+        .comparison-table td.aemax-col {
+            color: var(--accent-light);
+            font-weight: 600;
+        }
+
+        .check { color: var(--accent-green); font-weight: 700; }
+        .cross { color: var(--text-dim); }
+        .partial { color: var(--accent-3); }
+
+        /* ── ARCHITECTURE ────────────────── */
+        .arch-diagram {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 40px;
+            margin: 2rem 0;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            white-space: pre;
+            overflow-x: auto;
+            line-height: 1.5;
+        }
+
+        /* ── VISION ──────────────────────── */
+        .vision-card {
+            background: linear-gradient(135deg, rgba(124, 58, 237, 0.08), rgba(6, 182, 212, 0.05));
+            border: 1px solid rgba(124, 58, 237, 0.15);
+            border-radius: 20px;
+            padding: 48px;
+            text-align: center;
+            margin-top: 4rem;
+        }
+
+        .vision-card h3 {
+            font-size: 1.8rem;
+            margin-bottom: 1rem;
+        }
+
+        .vision-card p {
+            color: var(--text-secondary);
+            max-width: 700px;
+            margin: 0 auto;
+            font-size: 1rem;
+            line-height: 1.8;
+        }
+
+        /* ── FOOTER ──────────────────────── */
+        footer {
+            text-align: center;
+            padding: 4rem 2rem;
+            border-top: 1px solid var(--border);
+            color: var(--text-dim);
+            font-size: 0.85rem;
+        }
+
+        footer a { color: var(--accent-light); text-decoration: none; }
+
+        /* ── RESPONSIVE ──────────────────── */
+        @media (max-width: 768px) {
+            .module-grid { grid-template-columns: 1fr; }
+            .stats-bar { gap: 1.5rem; }
+            .hero h1 { font-size: 2.4rem; }
+            .arch-diagram { font-size: 0.6rem; padding: 20px; }
+            .vision-card { padding: 28px; }
+        }
+
+        /* ── LANG SWITCH ─────────────────── */
+        .it { display: none; }
+        body.lang-it .en { display: none; }
+        body.lang-it .it { display: block; }
+        body.lang-it span.it { display: inline; }
+        body.lang-it span.en { display: none; }
+    </style>
+</head>
+<body>
+
+<!-- Language Toggle -->
+<div class="lang-toggle">
+    <button class="lang-btn active" onclick="setLang('en')">EN</button>
+    <button class="lang-btn" onclick="setLang('it')">IT</button>
+</div>
+
+<!-- ═══════════════ HERO ═══════════════ -->
+<section class="hero">
+    <div class="hero-content">
+        <div class="hero-badge">⚡ Open Source · 100% Local · Zero Cloud</div>
+        <h1>
+            <span class="en">The Audio<br><span class="gradient">Media Center</span></span>
+            <span class="it">Il Media Center<br><span class="gradient">Audio Definitivo</span></span>
+        </h1>
+        <p class="subtitle en">
+            AudioEnhancerMAX is the open-source, AI-powered audio processing suite designed for podcasters, creators, and professionals. 
+            16+ intelligent filters. Edge computing across your devices. Powered by Gemma 4 AI. Everything runs locally on your hardware.
+        </p>
+        <p class="subtitle it">
+            AudioEnhancerMAX è la suite open-source di processing audio potenziata dall'intelligenza artificiale, progettata per podcaster, creator e professionisti.
+            16+ filtri intelligenti. Edge computing distribuito sui tuoi dispositivi. Potenza Gemma 4 AI. Tutto gira localmente sul tuo hardware.
+        </p>
+        <div class="hero-cta">
+            <a href="#modules" class="btn btn-primary">
+                <span class="en">Explore Modules →</span>
+                <span class="it">Esplora i Moduli →</span>
+            </a>
+            <a href="#comparison" class="btn btn-outline">
+                <span class="en">Compare vs Competition</span>
+                <span class="it">Confronto con la Concorrenza</span>
+            </a>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════ STATS ═══════════════ -->
+<div class="stats-bar">
+    <div class="stat"><div class="stat-value">16+</div><div class="stat-label"><span class="en">Audio Filters</span><span class="it">Filtri Audio</span></div></div>
+    <div class="stat"><div class="stat-value">0€</div><div class="stat-label"><span class="en">Forever Free</span><span class="it">Gratis per Sempre</span></div></div>
+    <div class="stat"><div class="stat-value">100%</div><div class="stat-label"><span class="en">Local Processing</span><span class="it">Elaborazione Locale</span></div></div>
+    <div class="stat"><div class="stat-value">∞</div><div class="stat-label"><span class="en">No Limits</span><span class="it">Nessun Limite</span></div></div>
+    <div class="stat"><div class="stat-value">AI</div><div class="stat-label"><span class="en">Gemma 4 Powered</span><span class="it">Powered by Gemma 4</span></div></div>
+</div>
+
+<!-- ═══════════════ MODULES ═══════════════ -->
+<section id="modules">
+    <div class="section-header">
+        <h2>
+            <span class="en">Processing Modules</span>
+            <span class="it">Moduli di Elaborazione</span>
+        </h2>
+        <p>
+            <span class="en">Every module in the AudioEnhancerMAX arsenal — from intelligent noise removal to distributed edge computing.</span>
+            <span class="it">Ogni modulo nell'arsenale di AudioEnhancerMAX — dalla rimozione intelligente del rumore al computing distribuito.</span>
+        </p>
+    </div>
+
+    <div class="module-grid">
+        <!-- Noise Removal -->
+        <div class="module-card">
+            <div class="module-icon" style="background: rgba(124, 58, 237, 0.12);">🔇</div>
+            <h3><span class="en">AI Noise Removal</span><span class="it">Rimozione Rumore AI</span></h3>
+            <p><span class="en">DeepFilterNet v3 + noisereduce with v2.0 wet/dry mixing and temporal smoothing. Removes background noise while preserving natural voice character — no metallic artifacts.</span>
+            <span class="it">DeepFilterNet v3 + noisereduce con mixing wet/dry v2.0 e smoothing temporale. Rimuove il rumore di fondo preservando il carattere naturale della voce — zero artefatti metallici.</span></p>
+            <span class="module-tag tag-ai">AI + DSP</span>
+        </div>
+
+        <!-- Wind Noise -->
+        <div class="module-card">
+            <div class="module-icon" style="background: rgba(6, 182, 212, 0.12);">💨</div>
+            <h3><span class="en">Wind Noise Remover</span><span class="it">Rimozione Rumore Vento</span></h3>
+            <p><span class="en">Butterworth low-pass filter + spectral gating specifically tuned for outdoor recordings. Gentle blend preserves voice warmth.</span>
+            <span class="it">Filtro Butterworth passa-basso + gating spettrale specificamente tarato per registrazioni outdoor. La fusione delicata preserva il calore della voce.</span></p>
+            <span class="module-tag tag-dsp">DSP</span>
+        </div>
+
+        <!-- Buzzing -->
+        <div class="module-card">
+            <div class="module-icon" style="background: rgba(6, 182, 212, 0.12);">⚡</div>
+            <h3><span class="en">Buzzing Remover</span><span class="it">Rimozione Ronzio</span></h3>
+            <p><span class="en">Notch filter targeting 50/60Hz electrical hum and harmonics. Auto-detects mains frequency with customizable Hz.</span>
+            <span class="it">Filtro notch per ronzio elettrico 50/60Hz e armoniche. Rileva automaticamente la frequenza di rete con Hz personalizzabile.</span></p>
+            <span class="module-tag tag-dsp">DSP</span>
+        </div>
+
+        <!-- Static -->
+        <div class="module-card">
+            <div class="module-icon" style="background: rgba(6, 182, 212, 0.12);">📻</div>
+            <h3><span class="en">Static Noise Remover</span><span class="it">Rimozione Rumore Statico</span></h3>
+            <p><span class="en">Stationary spectral gating with v2.0 frequency smoothing (600Hz) and temporal smoothing (80ms). Capped at 85% removal with wet/dry mixing.</span>
+            <span class="it">Gating spettrale stazionario con smoothing frequenziale v2.0 (600Hz) e temporale (80ms). Limitato all'85% con mixing wet/dry.</span></p>
+            <span class="module-tag tag-dsp">DSP</span>
+        </div>
+
+        <!-- Reverb/Echo -->
+        <div class="module-card">
+            <div class="module-icon" style="background: rgba(6, 182, 212, 0.12);">🏠</div>
+            <h3><span class="en">Reverb & Echo Remover</span><span class="it">Rimozione Riverbero & Eco</span></h3>
+            <p><span class="en">Spectral subtraction with v2.0 harmonic-preserving floor (0.25 magnitude). Removes room ambience without destroying voice texture.</span>
+            <span class="it">Sottrazione spettrale con floor v2.0 che preserva le armoniche (0.25 magnitudine). Rimuove l'ambienza senza distruggere la texture vocale.</span></p>
+            <span class="module-tag tag-dsp">DSP</span>
+        </div>
+
+        <!-- Filler Words -->
+        <div class="module-card">
+            <div class="module-icon" style="background: rgba(124, 58, 237, 0.12);">💬</div>
+            <h3><span class="en">Filler Word Removal</span><span class="it">Rimozione Intercalari</span></h3>
+            <p><span class="en">Whisper Large-v3 transcription + intelligent word-level segmentation. Removes "uhm", "eh", "cioè", "basically" and 20+ fillers in English & Italian.</span>
+            <span class="it">Trascrizione Whisper Large-v3 + segmentazione intelligente a livello di parola. Rimuove "uhm", "eh", "cioè", "tipo" e 20+ intercalari in Italiano & Inglese.</span></p>
+            <span class="module-tag tag-ai">AI · Whisper</span>
+        </div>
+
+        <!-- Hesitations -->
+        <div class="module-card">
+            <div class="module-icon" style="background: rgba(124, 58, 237, 0.12);">🤔</div>
+            <h3><span class="en">Hesitation Eliminator</span><span class="it">Eliminazione Esitazioni</span></h3>
+            <p><span class="en">AI-powered detection of speech hesitations, false starts, and mid-sentence pauses. Surgically removes while preserving natural flow.</span>
+            <span class="it">Rilevamento AI di esitazioni, falsi inizi e pause a metà frase. Rimozione chirurgica preservando il flusso naturale.</span></p>
+            <span class="module-tag tag-ai">AI · Whisper</span>
+        </div>
+
+        <!-- Stuttering -->
+        <div class="module-card">
+            <div class="module-icon" style="background: rgba(124, 58, 237, 0.12);">🔄</div>
+            <h3><span class="en">Stuttering Removal</span><span class="it">Rimozione Balbuzie</span></h3>
+            <p><span class="en">Detects repeated syllables and word fragments via Whisper transcription. Keeps only the final, complete utterance.</span>
+            <span class="it">Rileva sillabe ripetute e frammenti di parole tramite trascrizione Whisper. Mantiene solo l'enunciato finale e completo.</span></p>
+            <span class="module-tag tag-ai">AI · Whisper</span>
+        </div>
+
+        <!-- Breath Removal -->
+        <div class="module-card">
+            <div class="module-icon" style="background: rgba(6, 182, 212, 0.12);">🌬️</div>
+            <h3><span class="en">Breath Reduction</span><span class="it">Riduzione Respiri</span></h3>
+            <p><span class="en">v2.0: Never fully mutes — caps at 80% attenuation with 30ms crossfades. Natural-sounding breath reduction without "holes" in audio.</span>
+            <span class="it">v2.0: Non silenzia mai completamente — limitato all'80% di attenuazione con crossfade 30ms. Riduzione respiri naturale senza "buchi" nell'audio.</span></p>
+            <span class="module-tag tag-dsp">DSP</span>
+        </div>
+
+        <!-- Mouth Sounds -->
+        <div class="module-card">
+            <div class="module-icon" style="background: rgba(6, 182, 212, 0.12);">👄</div>
+            <h3><span class="en">Mouth Sound Removal</span><span class="it">Rimozione Suoni della Bocca</span></h3>
+            <p><span class="en">Spectral flux analysis detects clicks and lip smacks. v2.0 uses local-average interpolation for smoother repair with fewer false positives.</span>
+            <span class="it">L'analisi del flusso spettrale rileva click e schiocchi. La v2.0 usa interpolazione a media locale per riparazioni più fluide con meno falsi positivi.</span></p>
+            <span class="module-tag tag-dsp">DSP</span>
+        </div>
+
+        <!-- Studio Sound -->
+        <div class="module-card">
+            <div class="module-icon" style="background: rgba(245, 158, 11, 0.12);">🎙️</div>
+            <h3><span class="en">Studio Sound v2.0</span><span class="it">Suono da Studio v2.0</span></h3>
+            <p><span class="en">Broadcast-quality chain via Pedalboard: warmth boost (150Hz), gentle presence (4kHz), de-esser (6kHz), 2:1 compression with 25ms attack. Natural, not compressed.</span>
+            <span class="it">Catena broadcast-quality via Pedalboard: calore (150Hz), presenza delicata (4kHz), de-esser (6kHz), compressione 2:1 con attack 25ms. Naturale, non compresso.</span></p>
+            <span class="module-tag tag-dsp">DSP · Pedalboard</span>
+        </div>
+
+        <!-- Smart Mode -->
+        <div class="module-card">
+            <div class="module-icon" style="background: rgba(124, 58, 237, 0.12);">🧠</div>
+            <h3><span class="en">Gemma 4 Smart Mode</span><span class="it">Modalità Intelligente Gemma 4</span></h3>
+            <p><span class="en">v2.0: Gemma 4 E2B analyzes your audio and dynamically tunes every filter's strength. Clean audio → lighter processing. Noisy audio → stronger correction. Always natural.</span>
+            <span class="it">v2.0: Gemma 4 E2B analizza il tuo audio e regola dinamicamente l'intensità di ogni filtro. Audio pulito → processing leggero. Audio rumoroso → correzione più forte. Sempre naturale.</span></p>
+            <span class="module-tag tag-ai">AI · Gemma 4</span>
+            <span class="module-tag tag-new">NEW v2.0</span>
+        </div>
+
+        <!-- System Monitor -->
+        <div class="module-card">
+            <div class="module-icon" style="background: rgba(16, 185, 129, 0.12);">📊</div>
+            <h3><span class="en">System Monitor</span><span class="it">Monitor di Sistema</span></h3>
+            <p><span class="en">Real-time CPU, GPU, ANE, RAM, Power, and Temperature monitoring via macmon. 60-second history with sparkline charts. See your M3 MAX at work.</span>
+            <span class="it">Monitoraggio in tempo reale di CPU, GPU, ANE, RAM, Power e Temperatura via macmon. Storico 60 secondi con grafici sparkline. Guarda il tuo M3 MAX in azione.</span></p>
+            <span class="module-tag tag-new">NEW</span>
+        </div>
+
+        <!-- Edge Computing -->
+        <div class="module-card">
+            <div class="module-icon" style="background: rgba(245, 158, 11, 0.12);">🌐</div>
+            <h3><span class="en">Edge Computing Cluster</span><span class="it">Cluster Edge Computing</span></h3>
+            <p><span class="en">Turn your Android phones (S24 Ultra, Xiaomi 17 Ultra) into compute nodes via Termux. DSP filters run in parallel across all devices on your network. Auto-discovery via UDP.</span>
+            <span class="it">Trasforma i tuoi smartphone Android (S24 Ultra, Xiaomi 17 Ultra) in nodi di calcolo via Termux. I filtri DSP girano in parallelo su tutti i dispositivi nella tua rete. Auto-discovery via UDP.</span></p>
+            <span class="module-tag tag-edge">EDGE</span>
+            <span class="module-tag tag-new">NEW</span>
+        </div>
+
+        <!-- Super Resolution -->
+        <div class="module-card">
+            <div class="module-icon" style="background: rgba(6, 182, 212, 0.12);">🎵</div>
+            <h3><span class="en">Audio Super-Resolution</span><span class="it">Super-Risoluzione Audio</span></h3>
+            <p><span class="en">Upsamples low-quality audio to 48kHz with v2.0 subtle harmonic enhancement (alpha 0.15). Restores lost high-frequency detail without artificial harshness.</span>
+            <span class="it">Upsampling audio bassa qualità a 48kHz con enhancement armonico v2.0 sottile (alpha 0.15). Ripristina dettagli ad alta frequenza senza durezza artificiale.</span></p>
+            <span class="module-tag tag-dsp">DSP</span>
+        </div>
+
+        <!-- Transcription -->
+        <div class="module-card">
+            <div class="module-icon" style="background: rgba(124, 58, 237, 0.12);">📝</div>
+            <h3><span class="en">AI Transcription</span><span class="it">Trascrizione AI</span></h3>
+            <p><span class="en">Whisper Large-v3 provides word-level transcription with timestamps. Export to TXT, SRT, VTT, or JSON. Supports 99+ languages including Italian.</span>
+            <span class="it">Whisper Large-v3 fornisce trascrizione a livello di parola con timestamp. Esporta in TXT, SRT, VTT o JSON. Supporta 99+ lingue incluso l'Italiano.</span></p>
+            <span class="module-tag tag-ai">AI · Whisper</span>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════ COMPARISON ═══════════════ -->
+<section id="comparison">
+    <div class="section-header">
+        <h2>
+            <span class="en">How We Compare</span>
+            <span class="it">Confronto con la Concorrenza</span>
+        </h2>
+        <p>
+            <span class="en">AudioEnhancerMAX vs the industry leaders. Feature by feature.</span>
+            <span class="it">AudioEnhancerMAX vs i leader di mercato. Feature per feature.</span>
+        </p>
+    </div>
+
+    <div class="comparison-wrapper">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th><span class="en">Feature</span><span class="it">Funzionalità</span></th>
+                    <th class="aemax">AudioEnhancerMAX</th>
+                    <th>Adobe Podcast</th>
+                    <th>Descript</th>
+                    <th>Auphonic</th>
+                    <th>iZotope RX 11</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong><span class="en">Price</span><span class="it">Prezzo</span></strong></td>
+                    <td class="aemax-col">Free · Open Source</td>
+                    <td>$9.99/mo</td>
+                    <td>$24/mo</td>
+                    <td>$11-99/mo</td>
+                    <td>$399-$1,349</td>
+                </tr>
+                <tr>
+                    <td><strong><span class="en">100% Local Processing</span><span class="it">Elaborazione 100% Locale</span></strong></td>
+                    <td class="aemax-col"><span class="check">✓</span></td>
+                    <td><span class="cross">✗ Cloud</span></td>
+                    <td><span class="cross">✗ Cloud</span></td>
+                    <td><span class="cross">✗ Cloud</span></td>
+                    <td><span class="check">✓</span></td>
+                </tr>
+                <tr>
+                    <td><strong><span class="en">AI Noise Removal</span><span class="it">Rimozione Rumore AI</span></strong></td>
+                    <td class="aemax-col"><span class="check">✓</span> DeepFilterNet + noisereduce</td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="check">✓</span></td>
+                </tr>
+                <tr>
+                    <td><strong><span class="en">Filler Word Removal</span><span class="it">Rimozione Intercalari</span></strong></td>
+                    <td class="aemax-col"><span class="check">✓</span> Whisper + 20+ words</td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="check">✓</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                </tr>
+                <tr>
+                    <td><strong><span class="en">AI Content Classification</span><span class="it">Classificazione AI Contenuti</span></strong></td>
+                    <td class="aemax-col"><span class="check">✓</span> Gemma 4</td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="partial">◐</span> Basic</td>
+                    <td><span class="cross">✗</span></td>
+                </tr>
+                <tr>
+                    <td><strong><span class="en">Dynamic Parameter Tuning</span><span class="it">Tuning Dinamico Parametri</span></strong></td>
+                    <td class="aemax-col"><span class="check">✓</span> Gemma 4 per-filter</td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="partial">◐</span></td>
+                    <td><span class="partial">◐</span> Repair Assistant</td>
+                </tr>
+                <tr>
+                    <td><strong><span class="en">Edge Computing / Cluster</span><span class="it">Edge Computing / Cluster</span></strong></td>
+                    <td class="aemax-col"><span class="check">✓</span> Android workers</td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                </tr>
+                <tr>
+                    <td><strong><span class="en">System Monitor (GPU/ANE)</span><span class="it">Monitor Sistema (GPU/ANE)</span></strong></td>
+                    <td class="aemax-col"><span class="check">✓</span> Real-time</td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                </tr>
+                <tr>
+                    <td><strong><span class="en">Audio Super-Resolution</span><span class="it">Super-Risoluzione Audio</span></strong></td>
+                    <td class="aemax-col"><span class="check">✓</span> Up to 96kHz</td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="partial">◐</span></td>
+                </tr>
+                <tr>
+                    <td><strong><span class="en">Processing Limit</span><span class="it">Limite Elaborazione</span></strong></td>
+                    <td class="aemax-col">∞ Unlimited</td>
+                    <td>1-4 hrs/day</td>
+                    <td>10-30 hrs/mo</td>
+                    <td>2-100 hrs/mo</td>
+                    <td>∞</td>
+                </tr>
+                <tr>
+                    <td><strong><span class="en">Privacy (Data Stays Local)</span><span class="it">Privacy (Dati Locali)</span></strong></td>
+                    <td class="aemax-col"><span class="check">✓</span> Always</td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="check">✓</span></td>
+                </tr>
+                <tr>
+                    <td><strong><span class="en">Breath/Mouth Sound Removal</span><span class="it">Rimozione Respiri/Click</span></strong></td>
+                    <td class="aemax-col"><span class="check">✓</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="partial">◐</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="check">✓</span></td>
+                </tr>
+                <tr>
+                    <td><strong><span class="en">Open Source</span><span class="it">Open Source</span></strong></td>
+                    <td class="aemax-col"><span class="check">✓</span> MIT</td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                    <td><span class="cross">✗</span></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<!-- ═══════════════ ARCHITECTURE ═══════════════ -->
+<section id="architecture">
+    <div class="section-header">
+        <h2>
+            <span class="en">Architecture</span>
+            <span class="it">Architettura</span>
+        </h2>
+        <p>
+            <span class="en">Designed for maximum performance on Apple Silicon with distributed edge computing.</span>
+            <span class="it">Progettato per massime prestazioni su Apple Silicon con edge computing distribuito.</span>
+        </p>
+    </div>
+
+    <div class="arch-diagram">
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        AudioEnhancerMAX — System Architecture              │
+├──────────────────────────┬──────────────────────────────────────────────────┤
+│   🖥️  M3 MAX (Master)    │   📱 Edge Workers (Android Smartphones)         │
+│                          │                                                  │
+│   ┌──────────────────┐   │   ┌──────────────────┐ ┌──────────────────────┐ │
+│   │ FastAPI Backend   │   │   │ S24 Ultra         │ │ Xiaomi 17 Ultra      │ │
+│   │ ├─ Whisper (AI)   │   │   │ Snapdragon 8G3    │ │ Snapdragon 8 Elite   │ │
+│   │ ├─ Demucs  (AI)   │◄─┼──►│ ├─ noisereduce    │ │ ├─ noisereduce       │ │
+│   │ ├─ Gemma 4 (AI)   │   │   │ ├─ pedalboard    │ │ ├─ pedalboard        │ │
+│   │ ├─ DeepFilterNet  │   │   │ └─ scipy/DSP     │ │ └─ scipy/DSP         │ │
+│   │ └─ Cluster Mgr    │   │   │    port: 8877    │ │    port: 8877        │ │
+│   └──────┬───────────┘   │   └──────────────────┘ └──────────────────────┘ │
+│          │               │          ▲                      ▲                │
+│   ┌──────▼───────────┐   │          │    UDP Discovery     │                │
+│   │ System Monitor    │   │          └──────────┬──────────┘                │
+│   │ CPU │ GPU │ ANE   │   │                     │                           │
+│   │ RAM │ PWR │ TEMP  │   │              Wi-Fi LAN / HTTP                   │
+│   └──────────────────┘   │                                                  │
+├──────────────────────────┴──────────────────────────────────────────────────┤
+│   🌐 Frontend — Glassmorphism UI                                            │
+│   ├─ Processing Dashboard with ETA Estimation                               │
+│   ├─ System Monitor Panel (real-time gauges)                                │
+│   ├─ Cluster Panel (worker management)                                      │
+│   └─ Smart Presets with per-filter ETA badges                              │
+└─────────────────────────────────────────────────────────────────────────────┘</div>
+</section>
+
+<!-- ═══════════════ VISION ═══════════════ -->
+<section id="vision">
+    <div class="vision-card">
+        <h3>
+            <span class="en">The New XMB Media Center — For Audio</span>
+            <span class="it">Il Nuovo XMB Media Center — Per l'Audio</span>
+        </h3>
+        <p class="en">
+            Just like XMB revolutionized how we interact with media on PlayStation, AudioEnhancerMAX reimagines audio processing 
+            as a unified, beautiful, intelligent experience. No subscriptions. No cloud dependency. No limits. 
+            Your hardware. Your data. Your processing power — including every device on your network. 
+            This is the audio media center for the AI era.
+        </p>
+        <p class="it">
+            Come XMB ha rivoluzionato il modo in cui interagiamo con i media su PlayStation, AudioEnhancerMAX reimmagina 
+            l'elaborazione audio come un'esperienza unificata, bella e intelligente. Nessun abbonamento. Nessuna dipendenza dal cloud. 
+            Nessun limite. Il tuo hardware. I tuoi dati. La tua potenza di calcolo — incluso ogni dispositivo sulla tua rete. 
+            Questo è il media center audio per l'era dell'intelligenza artificiale.
+        </p>
+    </div>
+</section>
+
+<!-- ═══════════════ FOOTER ═══════════════ -->
+<footer>
+    <p>AudioEnhancerMAX by <a href="#">Fd</a> · Open Source · Optimized for Apple Silicon M3 MAX</p>
+    <p style="margin-top: 8px;">Built with FastAPI · Whisper · Gemma 4 · Pedalboard · DeepFilterNet</p>
+</footer>
+
+<script>
+function setLang(lang) {
+    document.body.classList.toggle('lang-it', lang === 'it');
+    document.querySelectorAll('.lang-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent.trim() === lang.toUpperCase());
+    });
+    localStorage.setItem('aemax-lang', lang);
+}
+
+// Restore saved language
+const saved = localStorage.getItem('aemax-lang');
+if (saved) setLang(saved);
+
+// Smooth scroll
+document.querySelectorAll('a[href^="#"]').forEach(a => {
+    a.addEventListener('click', e => {
+        e.preventDefault();
+        document.querySelector(a.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth' });
+    });
+});
+</script>
+</body>
+</html>

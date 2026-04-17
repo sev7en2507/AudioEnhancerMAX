@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="AudioEnhancerMAX by Fd — Professional AI-powered podcast audio processing suite. Remove noise, filler words, enhance audio quality with studio-grade tools.">
+    <title>AudioEnhancerMAX by Fd</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+</head>
+<body>
+
+<!-- ═══════════════ HEADER ═══════════════ -->
+<header class="app-header" id="app-header">
+    <div class="app-logo">
+        <div class="app-logo-icon">⚡</div>
+        <span class="app-logo-text">AudioEnhancerMAX</span>
+        <span class="app-logo-badge">by Fd</span>
+    </div>
+    <div class="header-actions">
+        <div class="header-status" id="gemma-status">
+            <span class="status-dot" id="gemma-dot"></span>
+            <span id="gemma-label">Checking Gemma 4...</span>
+        </div>
+        <div class="header-status" id="system-status">
+            <span class="status-dot"></span>
+            <span id="compute-label">M3 MAX</span>
+        </div>
+    </div>
+</header>
+
+<!-- ═══════════════ SIDEBAR ═══════════════ -->
+<nav class="sidebar" id="sidebar">
+    <div class="sidebar-section">
+        <div class="sidebar-section-title">Main</div>
+        <div class="sidebar-nav-item active" data-panel="upload-panel" onclick="switchPanel('upload-panel', this)">
+            <span class="icon">📁</span> Upload & Process
+        </div>
+        <div class="sidebar-nav-item" data-panel="presets-panel" onclick="switchPanel('presets-panel', this)">
+            <span class="icon">🎛️</span> Presets
+        </div>
+        <div class="sidebar-nav-item" data-panel="batch-panel" onclick="switchPanel('batch-panel', this)">
+            <span class="icon">📦</span> Batch Processing
+        </div>
+    </div>
+
+    <div class="sidebar-section">
+        <div class="sidebar-section-title">AI Tools</div>
+        <div class="sidebar-nav-item" data-panel="stt-panel" onclick="switchPanel('stt-panel', this)">
+            <span class="icon">📝</span> Speech to Text
+        </div>
+        <div class="sidebar-nav-item" data-panel="tts-panel" onclick="switchPanel('tts-panel', this)">
+            <span class="icon">🗣️</span> Text to Speech
+        </div>
+        <div class="sidebar-nav-item" data-panel="diarize-panel" onclick="switchPanel('diarize-panel', this)">
+            <span class="icon">👥</span> Speaker Diarization
+        </div>
+        <div class="sidebar-nav-item" data-panel="smart-panel" onclick="switchPanel('smart-panel', this)">
+            <span class="icon">🧠</span> Smart Mode
+            <span class="badge">Gemma 4</span>
+        </div>
+    </div>
+
+    <div class="sidebar-section">
+        <div class="sidebar-section-title">Audio</div>
+        <div class="sidebar-nav-item" data-panel="watermark-panel" onclick="switchPanel('watermark-panel', this)">
+            <span class="icon">🔒</span> Watermarking
+        </div>
+    </div>
+</nav>
+
+<!-- ═══════════════ MAIN CONTENT ═══════════════ -->
+<main class="main-content" id="main-content">
+
+    <!-- ─── UPLOAD & PROCESS PANEL ─── -->
+    <div class="panel active" id="upload-panel">
+        <!-- Upload Zone -->
+        <div class="upload-zone" id="upload-zone">
+            <div class="upload-zone-icon">📁</div>
+            <div class="upload-zone-title">Drop your audio or video file here</div>
+            <div class="upload-zone-subtitle">or click to browse</div>
+            <div class="upload-zone-formats">
+                <span class="format-badge">MP3</span>
+                <span class="format-badge">MP4</span>
+                <span class="format-badge">WAV</span>
+                <span class="format-badge">FLAC</span>
+                <span class="format-badge">OGG</span>
+                <span class="format-badge">M4A</span>
+            </div>
+            <input type="file" id="file-input" accept=".mp3,.mp4,.wav,.flac,.ogg,.m4a,.aac,.wma" hidden>
+        </div>
+
+        <!-- File Info -->
+        <div class="file-info-bar" id="file-info-bar">
+            <span class="file-info-name" id="file-name">—</span>
+            <div class="file-info-meta">
+                <div class="file-meta-item"><span class="label">Duration:</span><span id="file-duration">—</span></div>
+                <div class="file-meta-item"><span class="label">Rate:</span><span id="file-samplerate">—</span></div>
+                <div class="file-meta-item"><span class="label">Format:</span><span id="file-format">—</span></div>
+                <div class="file-meta-item"><span class="label">Size:</span><span id="file-size">—</span></div>
+            </div>
+            <div class="file-info-actions">
+                <button class="btn btn-sm btn-ghost" onclick="removeFile()">✕ Remove</button>
+            </div>
+        </div>
+
+        <!-- Waveform Visualizer -->
+        <div class="waveform-container" id="waveform-container">
+            <div class="waveform-header">
+                <span class="waveform-label">Waveform</span>
+                <div class="waveform-toggle">
+                    <button class="waveform-toggle-btn active" id="btn-show-original" onclick="showWaveform('original')">Original</button>
+                    <button class="waveform-toggle-btn" id="btn-show-processed" onclick="showWaveform('processed')">Processed</button>
+                </div>
+            </div>
+            <div id="waveform-original"></div>
+            <div id="waveform-processed" style="display:none"></div>
+            <div class="waveform-controls">
+                <button class="btn btn-icon btn-secondary" id="btn-play" onclick="togglePlayback()">▶</button>
+                <button class="btn btn-icon btn-secondary" onclick="stopPlayback()">⏹</button>
+                <span class="waveform-time"><span id="time-current">0:00</span> / <span id="time-total">0:00</span></span>
+                <div style="flex:1"></div>
+                <button class="btn btn-sm btn-secondary" onclick="zoomIn()">🔍+</button>
+                <button class="btn btn-sm btn-secondary" onclick="zoomOut()">🔍−</button>
+            </div>
+        </div>
+
+        <!-- Smart Mode Banner -->
+        <div class="smart-mode-banner" id="smart-mode-banner">
+            <div class="smart-mode-icon">🧠</div>
+            <div class="smart-mode-info">
+                <h3 id="smart-mode-type">Analyzing with Gemma 4...</h3>
+                <p id="smart-mode-description">AI is detecting content type and suggesting optimal settings.</p>
+            </div>
+            <span class="smart-mode-badge gemma" id="smart-engine-badge">Gemma 4 E2B</span>
+            <button class="btn btn-sm btn-primary" onclick="applySmartPreset()">Apply Suggestions</button>
+        </div>
+
+        <!-- Feature Controls -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title"><span class="icon">🎚️</span> Processing Features</h2>
+                <button class="btn btn-sm btn-secondary" onclick="runSmartMode()">🧠 Smart Mode</button>
+            </div>
+
+            <!-- Feature Tabs -->
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchTab('tab-cleanup', this)">🧹 Cleanup</button>
+                <button class="tab-btn" onclick="switchTab('tab-enhance', this)">✨ Enhance</button>
+                <button class="tab-btn" onclick="switchTab('tab-noise', this)">🔇 Noise</button>
+                <button class="tab-btn" onclick="switchTab('tab-advanced', this)">⚙️ Advanced</button>
+            </div>
+
+            <!-- Tab: Cleanup -->
+            <div class="tab-content active" id="tab-cleanup">
+                <div class="feature-grid">
+                    <div class="feature-item" id="feat-remove-noise">
+                        <div class="feature-icon">🚫</div>
+                        <div class="feature-info">
+                            <div class="feature-name">Remove Noise</div>
+                            <div class="feature-desc">AI-powered background noise removal</div>
+                        </div>
+                        <label class="toggle"><input type="checkbox" data-option="remove_noise" onchange="toggleFeature(this)"><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="feature-item" id="feat-filler-words">
+                        <div class="feature-icon">💬</div>
+                        <div class="feature-info">
+                            <div class="feature-name">Remove Filler Words</div>
+                            <div class="feature-desc">Eliminates uhm, uh, eh, ehm</div>
+                        </div>
+                        <label class="toggle"><input type="checkbox" data-option="remove_filler_words" onchange="toggleFeature(this)"><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="feature-item" id="feat-breaths">
+                        <div class="feature-icon">🌬️</div>
+                        <div class="feature-info">
+                            <div class="feature-name">Remove Breaths</div>
+                            <div class="feature-desc">Attenuate or remove breath sounds</div>
+                        </div>
+                        <label class="toggle"><input type="checkbox" data-option="remove_breaths" onchange="toggleFeature(this)"><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="feature-item" id="feat-mouth-sounds">
+                        <div class="feature-icon">👄</div>
+                        <div class="feature-info">
+                            <div class="feature-name">Remove Mouth Sounds</div>
+                            <div class="feature-desc">Clicks, lip smacking, saliva</div>
+                        </div>
+                        <label class="toggle"><input type="checkbox" data-option="remove_mouth_sounds" onchange="toggleFeature(this)"><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="feature-item" id="feat-hesitations">
+                        <div class="feature-icon">⏸️</div>
+                        <div class="feature-info">
+                            <div class="feature-name">Eliminate Hesitations</div>
+                            <div class="feature-desc">Remove unnatural pauses</div>
+                        </div>
+                        <label class="toggle"><input type="checkbox" data-option="eliminate_hesitations" onchange="toggleFeature(this)"><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="feature-item" id="feat-stuttering">
+                        <div class="feature-icon">🔁</div>
+                        <div class="feature-info">
+                            <div class="feature-name">Remove Stuttering</div>
+                            <div class="feature-desc">Fix repeated words/syllables</div>
+                        </div>
+                        <label class="toggle"><input type="checkbox" data-option="remove_stuttering" onchange="toggleFeature(this)"><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="feature-item" id="feat-silence">
+                        <div class="feature-icon">🔕</div>
+                        <div class="feature-info">
+                            <div class="feature-name">Remove Long Silences</div>
+                            <div class="feature-desc">Trim dead air and gaps</div>
+                        </div>
+                        <label class="toggle"><input type="checkbox" data-option="remove_long_silences" onchange="toggleFeature(this)"><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="feature-item" id="feat-mute">
+                        <div class="feature-icon">🔇</div>
+                        <div class="feature-info">
+                            <div class="feature-name">Mute Segments</div>
+                            <div class="feature-desc">Replace with silence (keep duration)</div>
+                        </div>
+                        <label class="toggle"><input type="checkbox" data-option="mute_segments" onchange="toggleFeature(this)"><span class="toggle-slider"></span></label>
+                    </div>
+                </div>
+
+                <!-- Sliders for cleanup -->
+                <div id="cleanup-sliders" class="mt-16">
+                    <div class="slider-group">
+                        <span class="slider-label">Noise strength</span>
+                        <input type="range" min="0" max="100" value="70" data-option="noise_reduction_strength" oninput="updateSliderValue(this)">
+                        <span class="slider-value">70%</span>
+                    </div>
+                    <div class="slider-group">
+                        <span class="slider-label">Breath reduction</span>
+                        <input type="range" min="0" max="100" value="80" data-option="breath_reduction_strength" oninput="updateSliderValue(this)">
+                        <span class="slider-value">80%</span>
+                    </div>
+                    <div class="slider-group">
+                        <span class="slider-label">Silence threshold</span>
+                        <input type="range" min="10" max="80" value="40" data-option="silence_threshold_db" oninput="updateSliderValue(this, 'dB')">
+                        <span class="slider-value">-40dB</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab: Enhance -->
+            <div class="tab-content" id="tab-enhance">
+                <div class="feature-grid">
+                    <div class="feature-item" id="feat-studio">
+                        <div class="feature-icon">🎙️</div>
+                        <div class="feature-info">
+                            <div class="feature-name">Studio Sound</div>
+                            <div class="feature-desc">EQ + Compression + Limiting chain</div>
+                        </div>
+                        <label class="toggle"><input type="checkbox" data-option="studio_sound" onchange="toggleFeature(this)"><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="feature-item" id="feat-autoeq">
+                        <div class="feature-icon">🎵</div>
+                        <div class="feature-info">
+                            <div class="feature-name">AutoEQ</div>
+                            <div class="feature-desc">AI-powered equalization</div>
+                        </div>
+                        <label class="toggle"><input type="checkbox" data-option="auto_eq" onchange="toggleFeature(this)"><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="feature-item" id="feat-normalize">
+                        <div class="feature-icon">📊</div>
+                        <div class="feature-info">
+                            <div class="feature-name">Normalize Volume</div>
+                            <div class="feature-desc">EBU R128 loudness normalization</div>
+                        </div>
+                        <label class="toggle"><input type="checkbox" data-option="normalize" onchange="toggleFeature(this)"><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="feature-item" id="feat-music">
+                        <div class="feature-icon">🎶</div>
+                        <div class="feature-info">
+                            <div class="feature-name">Keep Music</div>
+                            <div class="feature-desc">Preserve background music (Demucs)</div>
+                        </div>
+                        <label class="toggle"><input type="checkbox" data-option="keep_music" onchange="toggleFeature(this)"><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="feature-item" id="feat-superres">
+                        <div class="feature-icon">📈</div>
+                        <div class="feature-info">
+                            <div class="feature-name">Frequency Restoration</div>
+                            <div class="feature-desc">AI super-resolution / bandwidth extension</div>
+                        </div>
+                        <label class="toggle"><input type="checkbox" data-option="frequency_restoration" onchange="toggleFeature(this)"><span class="toggle-slider"></span></label>
+                    </div>
+                </div>
+                <div class="mt-16">
+                    <div class="slider-group">
+                        <span class="slider-label">Target LUFS</span>
+                        <input type="range" min="-30" max="-5" value="-16" data-option="target_loudness_lufs" oninput="updateSliderValue(this, 'LUFS')">
+                        <span class="slider-value">-16 LUFS</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab: Specific Noise -->
+            <div class="tab-content" id="tab-noise">
+                <div class="feature-grid">
+                    <div class="feature-item" id="feat-wind">
+                        <div class="feature-icon">🌪️</div>
+                        <div class="feature-info">
+                            <div class="feature-name">Wind Noise Remover</div>
+                            <div class="feature-desc">Outdoor wind and gusts</div>
+                        </div>
+                        <label class="toggle"><input type="checkbox" data-option="wind_noise_remover" onchange="toggleFeature(this)"><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="feature-item" id="feat-buzz">
+                        <div class="feature-icon">⚡</div>
+                        <div class="feature-info">
+                            <div class="feature-name">Buzzing Noise Remover</div>
+                            <div class="feature-desc">50/60Hz electrical hum</div>
+                        </div>
+                        <label class="toggle"><input type="checkbox" data-option="buzzing_noise_remover" onchange="toggleFeature(this)"><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="feature-item" id="feat-static">
+                        <div class="feature-icon">📻</div>
+                        <div class="feature-info">
+                            <div class="feature-name">Static Noise Remover</div>
+                            <div class="feature-desc">Mic hiss and static</div>
+                        </div>
+                        <label class="toggle"><input type="checkbox" data-option="static_noise_remover" onchange="toggleFeature(this)"><span class="toggle-slider"></span></label>
+                    </div>
+                    <div class="feature-item" id="feat-reverb">
+                        <div class="feature-icon">🏛️</div>
+                        <div class="feature-info">
+                            <div class="feature-name">Reverb & Echo Remover</div>
+                            <div class="feature-desc">Room echo and reverberation</div>
+                        </div>
+                        <label class="toggle"><input type="checkbox" data-option="reverb_echo_remover" onchange="toggleFeature(this)"><span class="toggle-slider"></span></label>
+                    </div>
+                </div>
+                <div class="mt-16">
+                    <div class="slider-group">
+                        <span class="slider-label">Buzz freq (Hz)</span>
+                        <input type="range" min="30" max="120" value="50" data-option="buzz_frequency_hz" oninput="updateSliderValue(this, 'Hz')">
+                        <span class="slider-value">50 Hz</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab: Advanced -->
+            <div class="tab-content" id="tab-advanced">
+                <div class="tts-controls">
+                    <div class="tts-control-group">
+                        <label>Output Format</label>
+                        <select data-option="output_format" onchange="updateOptions()">
+                            <option value="wav">WAV (Lossless)</option>
+                            <option value="mp3">MP3 (Compressed)</option>
+                            <option value="flac">FLAC (Lossless Compressed)</option>
+                        </select>
+                    </div>
+                    <div class="tts-control-group">
+                        <label>Target Sample Rate</label>
+                        <select data-option="target_sample_rate" onchange="updateOptions()">
+                            <option value="44100">44.1 kHz (CD Quality)</option>
+                            <option value="48000" selected>48 kHz (Professional)</option>
+                            <option value="96000">96 kHz (Hi-Res)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Process Button -->
+            <div class="process-actions">
+                <button class="btn btn-lg btn-primary w-full" id="btn-process" onclick="startProcessing()" disabled>
+                    ⚡ Process Audio
+                </button>
+            </div>
+        </div>
+
+        <!-- Progress -->
+        <div class="progress-container" id="progress-container">
+            <div class="card">
+                <div class="progress-header">
+                    <div class="progress-title">
+                        <div class="progress-title-spinner" id="progress-spinner"></div>
+                        <span id="progress-current-step">Initializing...</span>
+                    </div>
+                    <div class="progress-time-info">
+                        <span class="progress-elapsed" id="progress-elapsed">0:00</span>
+                        <div class="progress-eta" id="progress-eta" style="display:none">
+                            <span class="progress-eta-icon">⏳</span>
+                            <span id="progress-eta-value">—</span> remaining
+                        </div>
+                        <div class="progress-eta-reason" id="progress-eta-reason" style="display:none"></div>
+                    </div>
+                </div>
+                <div class="progress-bar-wrapper">
+                    <div class="progress-bar" id="progress-bar"></div>
+                </div>
+                <div class="progress-percentage" id="progress-percent">0%</div>
+                <div class="progress-steps" id="progress-steps"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── PRESETS PANEL ─── -->
+    <div class="panel" id="presets-panel">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title"><span class="icon">🎛️</span> Processing Presets</h2>
+                <button class="btn btn-sm btn-primary" onclick="saveCurrentAsPreset()">💾 Save Current Settings</button>
+            </div>
+            <div class="sidebar-section-title mb-12">BUILT-IN PRESETS</div>
+            <div class="preset-grid" id="builtin-presets"></div>
+            <div class="sidebar-section-title mt-20 mb-12">CUSTOM PRESETS</div>
+            <div class="preset-grid" id="custom-presets"></div>
+        </div>
+    </div>
+
+    <!-- ─── BATCH PROCESSING PANEL ─── -->
+    <div class="panel" id="batch-panel">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title"><span class="icon">📦</span> Batch Processing</h2>
+            </div>
+            <div class="upload-zone" id="batch-upload-zone" style="padding:30px">
+                <div class="upload-zone-icon">📦</div>
+                <div class="upload-zone-title">Drop multiple files here</div>
+                <div class="upload-zone-subtitle">All files will be processed with the same settings</div>
+                <input type="file" id="batch-file-input" accept=".mp3,.mp4,.wav,.flac,.ogg,.m4a" multiple hidden>
+            </div>
+            <div class="batch-file-list mt-16" id="batch-file-list"></div>
+            <div class="mt-16">
+                <button class="btn btn-lg btn-primary w-full" id="btn-batch-process" onclick="startBatchProcessing()" disabled>
+                    ⚡ Process All Files
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── SPEECH-TO-TEXT PANEL ─── -->
+    <div class="panel" id="stt-panel">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title"><span class="icon">📝</span> Speech to Text</h2>
+            </div>
+            <div class="requires-file-notice" id="stt-no-file">⚠️ Upload an audio file first from the "Upload & Process" panel</div>
+            <p class="text-sm text-muted mb-16">Transcribe your audio using faster-whisper (large-v3). Supports auto-language detection.</p>
+            <div class="tts-controls mb-16">
+                <div class="tts-control-group">
+                    <label>Language</label>
+                    <select id="stt-language">
+                        <option value="">Auto-detect</option>
+                        <option value="en">English</option>
+                        <option value="it">Italian</option>
+                        <option value="es">Spanish</option>
+                        <option value="fr">French</option>
+                        <option value="de">German</option>
+                        <option value="pt">Portuguese</option>
+                        <option value="ja">Japanese</option>
+                        <option value="zh">Chinese</option>
+                    </select>
+                </div>
+                <div class="tts-control-group">
+                    <label>Export Format</label>
+                    <select id="stt-format">
+                        <option value="txt">Plain Text</option>
+                        <option value="srt">SRT Subtitles</option>
+                        <option value="vtt">WebVTT</option>
+                        <option value="json">JSON (detailed)</option>
+                    </select>
+                </div>
+            </div>
+            <button class="btn btn-primary w-full mb-16" id="btn-transcribe" onclick="startTranscription()" disabled>
+                📝 Transcribe Audio
+            </button>
+            <div class="transcript-output" id="transcript-output" style="display:none"></div>
+            <div class="mt-12 flex gap-8" id="stt-actions" style="display:none">
+                <button class="btn btn-sm btn-secondary" onclick="copyTranscript()">📋 Copy</button>
+                <button class="btn btn-sm btn-secondary" onclick="downloadTranscript()">💾 Download</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── TEXT-TO-SPEECH PANEL ─── -->
+    <div class="panel" id="tts-panel">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title"><span class="icon">🗣️</span> Text to Speech</h2>
+            </div>
+            <p class="text-sm text-muted mb-16">Generate natural speech with XTTS-v2. Supports voice cloning from a 6-second sample.</p>
+            <textarea id="tts-text" rows="5" placeholder="Enter text to be spoken..."></textarea>
+            <div class="tts-controls mt-16">
+                <div class="tts-control-group">
+                    <label>Language</label>
+                    <select id="tts-language">
+                        <option value="en">English</option>
+                        <option value="it">Italian</option>
+                        <option value="es">Spanish</option>
+                        <option value="fr">French</option>
+                        <option value="de">German</option>
+                        <option value="pt">Portuguese</option>
+                    </select>
+                </div>
+                <div class="tts-control-group">
+                    <label>Style</label>
+                    <select id="tts-style">
+                        <option value="neutral">Neutral</option>
+                        <option value="expressive">Expressive</option>
+                        <option value="calm">Calm</option>
+                        <option value="energetic">Energetic</option>
+                    </select>
+                </div>
+                <div class="tts-control-group">
+                    <label>Voice Clone (optional)</label>
+                    <button class="btn btn-sm btn-secondary w-full" onclick="document.getElementById('clone-file-input').click()">
+                        🎤 Upload Voice Sample
+                    </button>
+                    <input type="file" id="clone-file-input" accept=".mp3,.wav,.m4a" hidden onchange="handleCloneUpload(event)">
+                    <span class="text-xs text-muted" id="clone-status">No voice sample loaded</span>
+                </div>
+            </div>
+            <div class="mt-12">
+                <div class="slider-group">
+                    <span class="slider-label">Speed</span>
+                    <input type="range" min="50" max="200" value="100" id="tts-speed" oninput="this.nextElementSibling.textContent=this.value+'%'">
+                    <span class="slider-value">100%</span>
+                </div>
+                <div class="slider-group">
+                    <span class="slider-label">Pitch</span>
+                    <input type="range" min="50" max="200" value="100" id="tts-pitch" oninput="this.nextElementSibling.textContent=this.value+'%'">
+                    <span class="slider-value">100%</span>
+                </div>
+                <div class="slider-group">
+                    <span class="slider-label">Warmth</span>
+                    <input type="range" min="0" max="100" value="50" id="tts-warmth" oninput="this.nextElementSibling.textContent=this.value+'%'">
+                    <span class="slider-value">50%</span>
+                </div>
+            </div>
+            <div class="mt-16">
+                <button class="btn btn-lg btn-primary w-full" onclick="synthesizeSpeech()">🗣️ Generate Speech</button>
+            </div>
+            <div id="tts-result" class="mt-16" style="display:none">
+                <audio id="tts-audio" controls class="w-full" style="border-radius:var(--radius-md)"></audio>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── SPEAKER DIARIZATION PANEL ─── -->
+    <div class="panel" id="diarize-panel">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title"><span class="icon">👥</span> Speaker Diarization</h2>
+            </div>
+            <div class="requires-file-notice" id="diarize-no-file">⚠️ Upload an audio file first from the "Upload & Process" panel</div>
+            <p class="text-sm text-muted mb-16">Identify who speaks when. Optimized for Apple M3 MAX via MPS.</p>
+            <div class="tts-controls mb-16">
+                <div class="tts-control-group">
+                    <label>Expected speakers</label>
+                    <select id="diarize-speakers">
+                        <option value="0">Auto-detect</option>
+                        <option value="2">2 speakers</option>
+                        <option value="3">3 speakers</option>
+                        <option value="4">4 speakers</option>
+                        <option value="5">5+ speakers</option>
+                    </select>
+                </div>
+            </div>
+            <button class="btn btn-primary w-full mb-16" id="btn-diarize" onclick="startDiarization()" disabled>
+                👥 Analyze Speakers
+            </button>
+            <div id="diarize-results" style="display:none">
+                <div class="card-title mb-12">Speaker Timeline</div>
+                <div class="diarization-bar" id="diarization-bar"></div>
+                <div class="mt-16" id="speaker-stats"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── SMART MODE PANEL ─── -->
+    <div class="panel" id="smart-panel">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title"><span class="icon">🧠</span> Smart Mode — Gemma 4 E2B</h2>
+            </div>
+            <div class="requires-file-notice" id="smart-no-file">⚠️ Upload an audio file first from the "Upload & Process" panel</div>
+            <p class="text-sm text-muted mb-16">Gemma 4 E2B analyzes your audio content and suggests optimal processing settings. Runs locally via Ollama.</p>
+            <button class="btn btn-primary w-full mb-16" id="btn-smart-analyze" onclick="runSmartMode()" disabled>
+                🧠 Analyze with Gemma 4
+            </button>
+            <div id="smart-results" style="display:none">
+                <div class="card mt-16">
+                    <div class="card-title mb-12">AI Analysis</div>
+                    <div id="smart-analysis-content"></div>
+                </div>
+                <div id="smart-suggestions" class="mt-16"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── WATERMARK PANEL ─── -->
+    <div class="panel" id="watermark-panel">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title"><span class="icon">🔒</span> Audio Watermarking</h2>
+            </div>
+            <div class="requires-file-notice" id="watermark-no-file">⚠️ Upload an audio file first from the "Upload & Process" panel</div>
+            <p class="text-sm text-muted mb-16">Embed an invisible watermark or detect existing watermarks.</p>
+            <div class="tts-controls mb-16">
+                <div class="tts-control-group">
+                    <label>Identifier (optional)</label>
+                    <input type="text" class="text-input" id="watermark-id" placeholder="e.g. episode-42, my-podcast">
+                </div>
+            </div>
+            <div class="flex gap-12">
+                <button class="btn btn-primary" id="btn-watermark" onclick="embedWatermark()" disabled>🔒 Embed Watermark</button>
+                <button class="btn btn-secondary" id="btn-detect-watermark" onclick="detectWatermark()" disabled>🔍 Detect Watermark</button>
+            </div>
+            <div id="watermark-result" class="mt-16" style="display:none"></div>
+        </div>
+    </div>
+
+</main>
+
+<!-- ─── Download Bar ─── -->
+<div class="download-bar" id="download-bar">
+    <div class="download-info">
+        <div class="label">Processed Audio Ready</div>
+        <div class="value" id="download-info-text">—</div>
+    </div>
+    <button class="btn btn-sm btn-secondary" onclick="downloadFile('wav')">💾 WAV</button>
+    <button class="btn btn-sm btn-secondary" onclick="downloadFile('mp3')">💾 MP3</button>
+    <button class="btn btn-sm btn-secondary" onclick="downloadFile('flac')">💾 FLAC</button>
+    <button class="btn btn-sm btn-primary" onclick="compareAB()">🔊 A/B Compare</button>
+</div>
+
+<!-- ─── Global Activity Bar ─── -->
+<div class="activity-bar" id="activity-bar">
+    <div class="activity-bar-spinner"></div>
+    <span class="activity-bar-text" id="activity-bar-text">Processing...</span>
+    <div class="activity-bar-progress">
+        <div class="activity-bar-progress-fill" id="activity-bar-fill" style="width:0%"></div>
+    </div>
+    <span class="activity-bar-time" id="activity-bar-time">
+        <span id="activity-elapsed">0:00</span>
+        <span class="activity-bar-eta" id="activity-bar-eta" style="display:none"></span>
+    </span>
+</div>
+
+<!-- ─── Toast Container ─── -->
+<div class="toast-container" id="toast-container"></div>
+
+<!-- ─── Loading Overlay ─── -->
+<div class="loading-overlay" id="loading-overlay">
+    <div class="loading-spinner"></div>
+    <div class="loading-text" id="loading-text">Processing...</div>
+    <div class="loading-eta" id="loading-eta" style="display:none"></div>
+    <div class="loading-eta-reason" id="loading-eta-reason" style="display:none"></div>
+</div>
+
+<!-- ─── WaveSurfer.js ─── -->
+<script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js" type="module"></script>
+
+<!-- ─── Application Scripts ─── -->
+<script src="/static/js/app.js"></script>
+
+</body>
+</html>
