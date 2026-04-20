@@ -218,6 +218,11 @@ def keep_music(
         model = get_model("htdemucs")
         model.eval()
 
+        # Enable Metal GPU acceleration on Apple Silicon
+        device = torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
+        model.to(device)
+        logger.info(f"Demucs on device: {device}")
+
         # Demucs expects (batch, channels, samples) at model.samplerate
         if audio.ndim == 1:
             audio_tensor = torch.from_numpy(audio).unsqueeze(0).unsqueeze(0).float()
@@ -231,9 +236,15 @@ def keep_music(
                 audio_tensor.squeeze(0), sr, model.samplerate
             ).unsqueeze(0)
 
-        # Separate sources
+        # Move audio to GPU
+        audio_tensor = audio_tensor.to(device)
+
+        # Separate sources (GPU-accelerated)
         with torch.no_grad():
-            sources = apply_model(model, audio_tensor)
+            sources = apply_model(model, audio_tensor, device=device)
+
+        # Move results back to CPU for numpy conversion
+        sources = sources.cpu()
 
         # sources shape: (batch, num_sources, channels, samples)
         # htdemucs sources: drums, bass, other, vocals

@@ -19,9 +19,12 @@ import soundfile as sf
 
 logger = logging.getLogger(__name__)
 
-# Discovery port for UDP broadcast
+# Discovery port for UDP broadcast (workers → server)
 DISCOVERY_PORT = 9999
 DISCOVERY_MAGIC = b"AEMAX_DISCOVER"
+# Server announcement port (server → workers)
+SERVER_ANNOUNCE_PORT = 9998
+SERVER_MAGIC = b"AEMAX_SERVER"
 WORKER_API_PORT = 8877
 
 # DSP-only filters that can be offloaded to workers
@@ -88,6 +91,7 @@ class ClusterManager:
         self._workers: Dict[str, WorkerInfo] = OrderedDict()
         self._lock = asyncio.Lock()
         self._discovery_thread: Optional[threading.Thread] = None
+        self._announce_thread: Optional[threading.Thread] = None
         self._running = False
 
     @property
@@ -103,7 +107,7 @@ class ClusterManager:
         ]
 
     def start(self):
-        """Start discovery listener."""
+        """Start discovery listener and server announcer."""
         if self._running:
             return
         self._running = True
@@ -111,7 +115,11 @@ class ClusterManager:
             target=self._discovery_listener, daemon=True
         )
         self._discovery_thread.start()
-        logger.info("Cluster manager started — listening for workers on UDP port %d", DISCOVERY_PORT)
+        self._announce_thread = threading.Thread(
+            target=self._server_broadcaster, daemon=True
+        )
+        self._announce_thread.start()
+        logger.info("Cluster manager started — listener UDP:%d, announcer UDP:%d", DISCOVERY_PORT, SERVER_ANNOUNCE_PORT)
 
     def stop(self):
         self._running = False
@@ -121,15 +129,30 @@ class ClusterManager:
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # Enable SO_REUSEPORT on macOS to allow multiple processes
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            except (AttributeError, OSError):
+                pass
+            # Enable receiving broadcast packets
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             sock.bind(("", DISCOVERY_PORT))
             sock.settimeout(2.0)
 
+            logger.info(f"🔍 Discovery listener active on 0.0.0.0:{DISCOVERY_PORT}")
+
             while self._running:
                 try:
-                    data, addr = sock.recvfrom(4096)
+                    data, addr = sock.recvfrom(8192)
+                    ip = addr[0]
+
+                    # Skip packets from our own IP
+                    if self._is_local_ip(ip):
+                        continue
+
                     if data.startswith(DISCOVERY_MAGIC):
-                        payload = json.loads(data[len(DISCOVERY_MAGIC):].decode())
-                        ip = addr[0]
+                        payload_str = data[len(DISCOVERY_MAGIC):].decode("utf-8")
+                        payload = json.loads(payload_str)
                         port = payload.get("port", WORKER_API_PORT)
 
                         # Register or update worker
@@ -149,12 +172,88 @@ class ClusterManager:
                         self._workers[key].last_seen = time.time()
 
                 except socket.timeout:
+                    # Check for stale workers every timeout cycle
+                    self._expire_stale_workers()
                     continue
                 except Exception as e:
                     logger.debug(f"Discovery parse error: {e}")
 
         except Exception as e:
-            logger.error(f"Discovery listener failed: {e}")
+            logger.error(f"Discovery listener failed: {e}", exc_info=True)
+        finally:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+    def _server_broadcaster(self):
+        """Broadcast server presence on UDP so workers can find us and auto-register."""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            except (AttributeError, OSError):
+                pass
+
+            local_ip = self._get_local_ip()
+            payload = json.dumps({
+                "ip": local_ip,
+                "port": 8000,
+                "name": "AudioEnhancerMAX",
+                "cluster_api": f"http://{local_ip}:8000/api/cluster/add",
+            }).encode("utf-8")
+
+            message = SERVER_MAGIC + payload
+
+            logger.info(f"📡 Server announcer broadcasting on UDP:{SERVER_ANNOUNCE_PORT} (server IP: {local_ip})")
+
+            while self._running:
+                try:
+                    # Broadcast to 255.255.255.255 and subnet broadcasts
+                    for broadcast_addr in self._get_broadcast_addresses():
+                        try:
+                            packet = socket.inet_aton(broadcast_addr)
+                            sock.sendto(message, (broadcast_addr, SERVER_ANNOUNCE_PORT))
+                        except Exception:
+                            pass
+                    # Always try global broadcast
+                    sock.sendto(message, ("255.255.255.255", SERVER_ANNOUNCE_PORT))
+                except Exception as e:
+                    logger.debug(f"Server announce failed: {e}")
+
+                time.sleep(3)
+
+        except Exception as e:
+            logger.error(f"Server broadcaster failed: {e}")
+        finally:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _get_broadcast_addresses() -> list:
+        """Get subnet broadcast addresses for all interfaces."""
+        import ipaddress
+        addresses = []
+        try:
+            for iface_name in socket.if_nameindex():
+                try:
+                    # Get addresses for each interface using netifaces-like approach
+                    pass
+                except Exception:
+                    pass
+            # Fallback: derive from local IP
+            local_ip = ClusterManager._get_local_ip()
+            if local_ip != "unknown":
+                # Assume /24 subnet
+                parts = local_ip.split(".")
+                if len(parts) == 4:
+                    addresses.append(f"{parts[0]}.{parts[1]}.{parts[2]}.255")
+        except Exception:
+            pass
+        return addresses
 
     async def add_worker(self, ip: str, port: int = WORKER_API_PORT) -> dict:
         """Manually add a worker by IP address."""
@@ -200,17 +299,10 @@ class ClusterManager:
     async def get_status(self) -> dict:
         """Get cluster status."""
         workers = [w.to_dict() for w in self._workers.values()]
-        online = sum(1 for w in self._workers.values() if w.status == "online")
+        online = sum(1 for w in self._workers.values() if w.status in ("online", "busy"))
 
         # Get local machine IP for worker setup
-        local_ip = "unknown"
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            local_ip = s.getsockname()[0]
-            s.close()
-        except Exception:
-            pass
+        local_ip = self._get_local_ip()
 
         return {
             "total_workers": len(self._workers),
@@ -220,6 +312,42 @@ class ClusterManager:
             "discovery_port": DISCOVERY_PORT,
             "worker_api_port": WORKER_API_PORT,
         }
+
+    @staticmethod
+    def _get_local_ip() -> str:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "unknown"
+
+    @staticmethod
+    def _is_local_ip(ip: str) -> bool:
+        """Check if an IP belongs to this machine."""
+        try:
+            local_ips = set()
+            local_ips.add("127.0.0.1")
+            for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                local_ips.add(info[4][0])
+            # Also check via UDP trick
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ips.add(s.getsockname()[0])
+            s.close()
+            return ip in local_ips
+        except Exception:
+            return False
+
+    def _expire_stale_workers(self):
+        """Mark workers as offline if not seen for 30+ seconds."""
+        now = time.time()
+        for w in self._workers.values():
+            if w.status == "online" and (now - w.last_seen) > 30:
+                logger.info(f"⚠️ Worker {w.name} ({w.ip}) went stale, marking offline")
+                w.status = "offline"
 
     def can_distribute(self, options_dict: dict) -> bool:
         """Check if the current filter set can benefit from distribution."""

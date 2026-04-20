@@ -5,7 +5,7 @@
 ### The Open-Source AI Audio Media Center
 
 **Next-gen, AI-powered audio processing suite for podcasters, creators and professionals.**<br>
-**16+ intelligent filters · Gemma 4 AI · Edge Computing · 100% Local · Zero Cloud**
+**16+ intelligent filters · Metal GPU · Gemma 4 AI · Edge Cluster · 100% Local · v3.0**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-7c3aed.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-06b6d4.svg)](https://python.org)

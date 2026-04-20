@@ -26,6 +26,10 @@
             <span class="status-dot"></span>
             <span id="compute-label">M3 MAX</span>
         </div>
+        <div class="header-status cluster-badge" id="cluster-badge" style="display:none" onclick="switchPanel('cluster-panel', document.querySelector('[data-panel=cluster-panel]'))">
+            <span class="status-dot" id="cluster-dot"></span>
+            <span id="cluster-label">0 Workers</span>
+        </div>
     </div>
 </header>
 
@@ -66,6 +70,28 @@
         <div class="sidebar-nav-item" data-panel="watermark-panel" onclick="switchPanel('watermark-panel', this)">
             <span class="icon">🔒</span> Watermarking
         </div>
+    </div>
+
+    <div class="sidebar-section">
+        <div class="sidebar-section-title">Infrastructure</div>
+        <div class="sidebar-nav-item" data-panel="cluster-panel" onclick="switchPanel('cluster-panel', this)">
+            <span class="icon">🌐</span> Edge Cluster
+            <span class="badge cluster-count-badge" id="sidebar-cluster-count" style="display:none">0</span>
+        </div>
+    </div>
+
+    <div class="sidebar-section">
+        <div class="sidebar-section-title">System</div>
+        <div class="sidebar-nav-item" data-panel="settings-panel" onclick="switchPanel('settings-panel', this)">
+            <span class="icon">⚙️</span> Settings
+        </div>
+        <div class="sidebar-nav-item" data-panel="about-panel" onclick="switchPanel('about-panel', this)">
+            <span class="icon">ℹ️</span> About
+        </div>
+    </div>
+
+    <div class="sidebar-version">
+        <span>v3.0.0</span> · <span id="sidebar-chip">M3 Max</span>
     </div>
 </nav>
 
@@ -611,6 +637,57 @@
         </div>
     </div>
 
+    <!-- ─── EDGE CLUSTER PANEL ─── -->
+    <div class="panel" id="cluster-panel">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title"><span class="icon">🌐</span> Edge Computing Cluster</h2>
+                <button class="btn btn-sm btn-secondary" onclick="refreshCluster()">🔄 Refresh</button>
+            </div>
+            <p class="text-sm text-muted mb-16">Connected devices that contribute compute power for distributed audio processing. Workers auto-announce via UDP on port 9999.</p>
+
+            <!-- Master Node -->
+            <div class="cluster-section-title">🖥️ MASTER NODE</div>
+            <div class="cluster-node master-node" id="master-node-card">
+                <div class="cluster-node-header">
+                    <div class="cluster-node-status online"></div>
+                    <div class="cluster-node-name" id="master-node-name">Mac (M3 MAX)</div>
+                    <span class="cluster-node-role">MASTER</span>
+                </div>
+                <div class="cluster-node-stats">
+                    <div class="cluster-stat"><span class="cluster-stat-label">Chip</span><span class="cluster-stat-value" id="master-chip">—</span></div>
+                    <div class="cluster-stat"><span class="cluster-stat-label">Role</span><span class="cluster-stat-value">Orchestrator + ML Models</span></div>
+                    <div class="cluster-stat"><span class="cluster-stat-label">Filters</span><span class="cluster-stat-value">16 (all)</span></div>
+                </div>
+                <div class="cluster-benchmark">
+                    <div class="cluster-benchmark-label">Benchmark Power</div>
+                    <div class="cluster-benchmark-bar"><div class="cluster-benchmark-fill master" style="width:100%"></div></div>
+                    <span class="cluster-benchmark-value">Master — Full Pipeline</span>
+                </div>
+            </div>
+
+            <!-- Edge Workers -->
+            <div class="cluster-section-title mt-20">📱 EDGE WORKERS <span class="text-muted" id="cluster-worker-count">(0 connected)</span></div>
+            <div id="cluster-workers-list">
+                <div class="cluster-empty" id="cluster-empty">
+                    <div class="cluster-empty-icon">📡</div>
+                    <div class="cluster-empty-text">No edge workers connected</div>
+                    <div class="cluster-empty-hint">Install the AudioEnhancerMAX Worker app on your Android phone and connect to the same Wi-Fi network.</div>
+                </div>
+            </div>
+
+            <!-- Add Worker Manually -->
+            <div class="cluster-add-worker mt-16">
+                <div class="sidebar-section-title">ADD WORKER MANUALLY</div>
+                <div class="flex gap-8 mt-8">
+                    <input type="text" class="text-input" id="add-worker-ip" placeholder="IP Address (e.g. 192.168.1.100)" style="flex:1">
+                    <input type="number" class="text-input" id="add-worker-port" placeholder="Port" value="8877" style="width:80px">
+                    <button class="btn btn-sm btn-primary" onclick="addWorkerManually()">+ Add</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </main>
 
 <!-- ─── Download Bar ─── -->
@@ -641,12 +718,270 @@
 <!-- ─── Toast Container ─── -->
 <div class="toast-container" id="toast-container"></div>
 
-<!-- ─── Loading Overlay ─── -->
+<!-- ═══════════════ SETTINGS PANEL ═══════════════ -->
+<div class="panel" id="settings-panel" style="display:none">
+    <div class="panel-header">
+        <h2>⚙️ Settings</h2>
+        <p class="panel-subtitle">Configure AudioEnhancerMAX v3.0</p>
+    </div>
+    <div class="panel-body settings-grid">
+        <div class="settings-group">
+            <h3>🖥️ Processing</h3>
+            <div class="setting-item">
+                <label>Default Output Format</label>
+                <select id="setting-output-format" class="setting-select">
+                    <option value="wav" selected>WAV (Lossless)</option>
+                    <option value="flac">FLAC (Lossless Compressed)</option>
+                    <option value="mp3">MP3 (320kbps)</option>
+                </select>
+            </div>
+            <div class="setting-item">
+                <label>Target Loudness (LUFS)</label>
+                <input type="range" id="setting-loudness" min="-24" max="-10" value="-16" class="setting-range">
+                <span class="setting-range-val" id="setting-loudness-val">-16 LUFS</span>
+            </div>
+            <div class="setting-item">
+                <label>Processing Priority</label>
+                <select id="setting-priority" class="setting-select">
+                    <option value="quality" selected>Quality First</option>
+                    <option value="balanced">Balanced</option>
+                    <option value="speed">Speed First</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="settings-group">
+            <h3>🌐 Edge Cluster</h3>
+            <div class="setting-item">
+                <label>Auto-discover Workers</label>
+                <label class="setting-toggle">
+                    <input type="checkbox" id="setting-autodiscover" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div class="setting-item">
+                <label>Worker Timeout (seconds)</label>
+                <input type="number" id="setting-worker-timeout" value="30" min="5" max="120" class="setting-input">
+            </div>
+            <div class="setting-item">
+                <label>Offload DSP to Edge</label>
+                <label class="setting-toggle">
+                    <input type="checkbox" id="setting-offload-dsp" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <div class="settings-group">
+            <h3>📊 Monitoring</h3>
+            <div class="setting-item">
+                <label>HW Poll Interval</label>
+                <select id="setting-poll-interval" class="setting-select">
+                    <option value="1000">1 second (High)</option>
+                    <option value="2000" selected>2 seconds (Default)</option>
+                    <option value="5000">5 seconds (Low)</option>
+                </select>
+            </div>
+            <div class="setting-item">
+                <label>Show Per-core CPU</label>
+                <label class="setting-toggle">
+                    <input type="checkbox" id="setting-show-cores" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <div class="settings-group">
+            <h3>🧠 AI Engine</h3>
+            <div class="setting-item">
+                <label>Whisper Model Size</label>
+                <select id="setting-whisper-model" class="setting-select">
+                    <option value="base">Base (fast, lower accuracy)</option>
+                    <option value="medium">Medium (balanced)</option>
+                    <option value="large-v3" selected>Large-v3 (best accuracy)</option>
+                </select>
+            </div>
+            <div class="setting-item">
+                <label>Dynamic Tuning (Gemma 4)</label>
+                <label class="setting-toggle">
+                    <input type="checkbox" id="setting-dynamic-tuning" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════ ABOUT PANEL ═══════════════ -->
+<div class="panel" id="about-panel" style="display:none">
+    <div class="panel-header">
+        <h2>ℹ️ About AudioEnhancerMAX</h2>
+        <p class="panel-subtitle">v3.0.0 — Edge Cluster + Metal GPU Edition</p>
+    </div>
+    <div class="panel-body about-content">
+        <div class="about-hero">
+            <div class="about-logo">⚡</div>
+            <div>
+                <h3>AudioEnhancerMAX <span class="about-version">v3.0</span></h3>
+                <p>Professional AI-powered audio processing suite</p>
+                <p class="about-by">Created by <strong>Fd</strong> — Optimized for Apple Silicon</p>
+            </div>
+        </div>
+
+        <div class="about-section">
+            <h3>🏗️ Architecture</h3>
+            <div class="about-arch-grid">
+                <div class="about-arch-item">
+                    <span class="about-arch-icon">🖥️</span>
+                    <strong>Backend</strong>
+                    <span>FastAPI + Python 3.11</span>
+                </div>
+                <div class="about-arch-item">
+                    <span class="about-arch-icon">🎨</span>
+                    <strong>Frontend</strong>
+                    <span>Vanilla JS + CSS3</span>
+                </div>
+                <div class="about-arch-item">
+                    <span class="about-arch-icon">🧠</span>
+                    <strong>AI Engine</strong>
+                    <span>Whisper + Gemma 4</span>
+                </div>
+                <div class="about-arch-item">
+                    <span class="about-arch-icon">⬡</span>
+                    <strong>GPU</strong>
+                    <span>PyTorch MPS (Metal)</span>
+                </div>
+                <div class="about-arch-item">
+                    <span class="about-arch-icon">📱</span>
+                    <strong>Edge Workers</strong>
+                    <span>Android Kotlin + HTTP</span>
+                </div>
+                <div class="about-arch-item">
+                    <span class="about-arch-icon">🔊</span>
+                    <strong>Audio DSP</strong>
+                    <span>scipy + pedalboard</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="about-section">
+            <h3>🆕 What's New in v3.0</h3>
+            <div class="about-changelog">
+                <div class="changelog-item">
+                    <span class="changelog-tag new">NEW</span>
+                    <span>Apple Metal GPU acceleration (PyTorch MPS) for Demucs music separation</span>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag new">NEW</span>
+                    <span>Distributed Edge Cluster — offload DSP filters to Android smartphones</span>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag new">NEW</span>
+                    <span>Real-time processing dashboard with per-core CPU heatmap</span>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag new">NEW</span>
+                    <span>Built-in DSP benchmark for cross-device performance comparison</span>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag new">NEW</span>
+                    <span>Apple Silicon acceleration module (Accelerate vDSP + ARM NEON + MPS)</span>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag improved">IMPROVED</span>
+                    <span>Dynamic filter tuning via Gemma 4 E2B local inference</span>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag improved">IMPROVED</span>
+                    <span>v2.0 studio sound chain — broadcast-quality compression + de-esser</span>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag improved">IMPROVED</span>
+                    <span>Noise removal with wet/dry mix to prevent metallic artifacts</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="about-section">
+            <h3>🔧 Hardware Acceleration</h3>
+            <div class="about-accel" id="about-accel-list">
+                <!-- Populated by JS -->
+                <div class="about-accel-item loading">Loading acceleration info...</div>
+            </div>
+        </div>
+
+        <div class="about-section">
+            <h3>📋 System Info</h3>
+            <div class="about-sysinfo" id="about-sysinfo">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+
+        <div class="about-section">
+            <h3>🔄 Updates</h3>
+            <p class="about-text">AudioEnhancerMAX is open source. To update:</p>
+            <code class="about-code">cd AudioEnhancer && git pull && pip install -r requirements.txt</code>
+            <p class="about-text" style="margin-top:8px">Check for new releases on <a href="https://github.com" target="_blank" style="color:var(--accent-primary)">GitHub</a></p>
+        </div>
+
+        <div class="about-section">
+            <h3>📄 License & Credits</h3>
+            <p class="about-text">MIT License — © 2026 Fd</p>
+            <p class="about-text">Built with: FastAPI, PyTorch, faster-whisper, Demucs, pedalboard, noisereduce, scipy, numpy, librosa, pyannote.audio</p>
+        </div>
+    </div>
+</div>
+
+<!-- ─── Processing Dashboard Overlay ─── -->
 <div class="loading-overlay" id="loading-overlay">
-    <div class="loading-spinner"></div>
-    <div class="loading-text" id="loading-text">Processing...</div>
-    <div class="loading-eta" id="loading-eta" style="display:none"></div>
-    <div class="loading-eta-reason" id="loading-eta-reason" style="display:none"></div>
+    <div class="processing-dashboard">
+        <!-- Header -->
+        <div class="proc-dash-header">
+            <div class="loading-spinner"></div>
+            <div>
+                <div class="loading-text" id="loading-text">Processing...</div>
+                <div class="loading-eta" id="loading-eta" style="display:none"></div>
+            </div>
+        </div>
+        <div class="loading-eta-reason" id="loading-eta-reason" style="display:none"></div>
+
+        <!-- Nodes utilization -->
+        <div class="proc-nodes" id="proc-nodes">
+            <!-- Master node -->
+            <div class="proc-node master" id="proc-node-master">
+                <div class="proc-node-head">
+                    <span class="proc-node-dot online"></span>
+                    <span class="proc-node-label">🖥️ Mac — Master</span>
+                </div>
+                <div class="proc-node-chip" id="proc-master-chip">Apple M3 Max</div>
+                <div class="proc-node-meters">
+                    <div class="proc-meter">
+                        <span class="proc-meter-label">CPU</span>
+                        <div class="proc-meter-bar"><div class="proc-meter-fill" id="proc-master-cpu" style="width:0%"></div></div>
+                        <span class="proc-meter-val" id="proc-master-cpu-val">—</span>
+                    </div>
+                    <div class="proc-meter">
+                        <span class="proc-meter-label">GPU</span>
+                        <div class="proc-meter-bar"><div class="proc-meter-fill gpu" id="proc-master-gpu" style="width:0%"></div></div>
+                        <span class="proc-meter-val" id="proc-master-gpu-val">—</span>
+                    </div>
+                    <div class="proc-meter">
+                        <span class="proc-meter-label">RAM</span>
+                        <div class="proc-meter-bar"><div class="proc-meter-fill ram" id="proc-master-ram" style="width:0%"></div></div>
+                        <span class="proc-meter-val" id="proc-master-ram-val">—</span>
+                    </div>
+                </div>
+                <!-- Per-core heatmap + power + benchmark -->
+                <div class="proc-node-extras" id="proc-master-extras"></div>
+            </div>
+            <!-- Worker nodes injected here by JS -->
+        </div>
+
+        <!-- Pipeline steps -->
+        <div class="proc-pipeline" id="proc-pipeline">
+            <!-- Filters rendered by JS -->
+        </div>
+    </div>
 </div>
 
 <!-- ─── WaveSurfer.js ─── -->

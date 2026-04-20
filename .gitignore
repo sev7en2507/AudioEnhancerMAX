@@ -34,3 +34,12 @@ models/
 ## OS
 Thumbs.db
 .DS_Store
+
+## Android Worker build artifacts
+android-worker/.gradle/
+android-worker/build/
+android-worker/app/build/
+android-worker/local.properties
+android-worker/.idea/
+*.apk
+!releases/*.apk

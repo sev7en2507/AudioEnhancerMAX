@@ -43,8 +43,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="AudioEnhancerMAX by Fd",
-    description="Professional podcast audio processing suite — Optimized for Apple Silicon M3 MAX",
-    version="1.0.0",
+    description="Professional podcast audio processing suite — Apple Silicon Metal GPU + Edge Cluster computing",
+    version="3.0.0",
 )
 
 app.add_middleware(
@@ -86,11 +86,22 @@ class DiarizationRequest(BaseModel):
 @app.on_event("startup")
 async def startup_services():
     """Start background services on app startup."""
+    # Configure Apple Silicon acceleration (MPS/Metal/Accelerate)
+    from app.services.apple_acceleration import configure_apple_acceleration
+    configure_apple_acceleration()
+
     from app.services.system_monitor import system_monitor
     from app.services.cluster_manager import cluster_manager
     system_monitor.start()
     cluster_manager.start()
     logger.info("🚀 System monitor + Cluster manager started")
+
+    # Run DSP benchmark in background (doesn't block startup)
+    import threading
+    def _run_benchmark():
+        from app.services.benchmark import run_dsp_benchmark
+        run_dsp_benchmark()
+    threading.Thread(target=_run_benchmark, daemon=True).start()
 
 
 @app.on_event("shutdown")
@@ -371,34 +382,77 @@ async def process_audio(request: ProcessingRequest):
             current[0] += 1
             await progress_tracker.send_progress(file_id, name, current[0]/steps, msg)
 
-        # ── Processing Chain (order matters!) ──
+        # ── v2.0: Distributed Edge Processing ──
+        # If edge workers are online, offload DSP filters to them in parallel
+        try:
+            from app.services.cluster_manager import cluster_manager
+            opts_dict = options.model_dump()
 
-        if options.remove_noise:
+            if cluster_manager.can_distribute(opts_dict):
+                n_workers = len(cluster_manager.online_workers)
+                await progress_tracker.send_progress(
+                    file_id, "cluster", 0.08,
+                    f"🌐 Distributing DSP to {n_workers} edge worker(s)..."
+                )
+
+                # Build filter dict for offloadable filters only
+                from app.services.cluster_manager import OFFLOADABLE_FILTERS
+                offload_opts = {}
+                for key in OFFLOADABLE_FILTERS:
+                    if opts_dict.get(key):
+                        offload_opts[key] = True
+
+                if offload_opts:
+                    audio = await cluster_manager.process_distributed(
+                        audio, sr, offload_opts,
+                        progress_callback=lambda name, pct, msg: progress_tracker.send_progress(file_id, name, pct, msg)
+                    )
+
+                    # Mark offloaded DSP filters as done so the local chain skips them
+                    distributed_filters = set(offload_opts.keys())
+                    logger.info(f"🌐 Distributed processing done for: {distributed_filters}")
+
+                    await progress_tracker.send_progress(
+                        file_id, "cluster_done", 0.35,
+                        f"🌐 Edge processing complete — {len(distributed_filters)} filters distributed"
+                    )
+                else:
+                    distributed_filters = set()
+            else:
+                distributed_filters = set()
+        except Exception as e:
+            logger.warning(f"Distributed processing skipped: {e}")
+            distributed_filters = set()
+
+        # ── Processing Chain (order matters!) ──
+        # Filters already handled by distributed workers are skipped.
+
+        if options.remove_noise and "remove_noise" not in distributed_filters:
             from app.services.noise_removal import remove_noise
             audio = remove_noise(audio, sr, options.noise_reduction_strength)
             await step("remove_noise", "✓ Noise removal complete")
 
-        if options.wind_noise_remover:
+        if options.wind_noise_remover and "wind_noise_remover" not in distributed_filters:
             from app.services.specific_noise import remove_wind_noise
             audio = remove_wind_noise(audio, sr)
             await step("wind", "✓ Wind noise removed")
 
-        if options.buzzing_noise_remover:
+        if options.buzzing_noise_remover and "buzzing_noise_remover" not in distributed_filters:
             from app.services.specific_noise import remove_buzzing_noise
             audio = remove_buzzing_noise(audio, sr, options.buzz_frequency_hz)
             await step("buzz", "✓ Buzzing removed")
 
-        if options.static_noise_remover:
+        if options.static_noise_remover and "static_noise_remover" not in distributed_filters:
             from app.services.specific_noise import remove_static_noise
             audio = remove_static_noise(audio, sr)
             await step("static", "✓ Static noise removed")
 
-        if options.reverb_echo_remover:
+        if options.reverb_echo_remover and "reverb_echo_remover" not in distributed_filters:
             from app.services.specific_noise import remove_reverb_echo
             audio = remove_reverb_echo(audio, sr)
             await step("reverb", "✓ Reverb/echo removed")
 
-        if options.remove_mouth_sounds:
+        if options.remove_mouth_sounds and "remove_mouth_sounds" not in distributed_filters:
             from app.services.speech_cleanup import remove_mouth_sounds
             audio = remove_mouth_sounds(audio, sr, options.mouth_sound_sensitivity)
             await step("mouth", "✓ Mouth sounds removed")
@@ -418,12 +472,12 @@ async def process_audio(request: ProcessingRequest):
             audio = remove_stuttering(audio, sr)
             await step("stutter", "✓ Stuttering removed")
 
-        if options.remove_breaths:
+        if options.remove_breaths and "remove_breaths" not in distributed_filters:
             from app.services.speech_cleanup import remove_breaths
             audio = remove_breaths(audio, sr, options.breath_reduction_strength)
             await step("breaths", "✓ Breaths removed")
 
-        if options.remove_long_silences:
+        if options.remove_long_silences and "remove_long_silences" not in distributed_filters:
             from app.services.silence_removal import remove_long_silences, mute_segments, detect_silences
             if options.mute_segments:
                 silences = detect_silences(audio, sr, options.silence_threshold_db, options.min_silence_duration_ms)
@@ -437,22 +491,22 @@ async def process_audio(request: ProcessingRequest):
             audio = keep_music(audio, sr)
             await step("music", "✓ Music preserved")
 
-        if options.auto_eq:
+        if options.auto_eq and "auto_eq" not in distributed_filters:
             from app.services.enhancement import apply_auto_eq
             audio = apply_auto_eq(audio, sr)
             await step("eq", "✓ AutoEQ applied")
 
-        if options.studio_sound:
+        if options.studio_sound and "studio_sound" not in distributed_filters:
             from app.services.enhancement import apply_studio_sound
             audio = apply_studio_sound(audio, sr)
             await step("studio", "✓ Studio sound applied")
 
-        if options.frequency_restoration:
+        if options.frequency_restoration and "frequency_restoration" not in distributed_filters:
             from app.services.super_resolution import restore_frequencies
             audio, sr = restore_frequencies(audio, sr, options.target_sample_rate)
             await step("superres", "✓ Frequency restoration complete")
 
-        if options.normalize:
+        if options.normalize and "normalize" not in distributed_filters:
             from app.services.enhancement import normalize_volume
             audio = normalize_volume(audio, sr, options.target_loudness_lufs)
             await step("normalize", "✓ Volume normalized")
@@ -831,14 +885,89 @@ async def health():
     except Exception:
         gemma_status = "error"
 
+    # System utilization (real-time from macmon)
+    system_data = {}
+    try:
+        from app.services.system_monitor import system_monitor
+        metrics = system_monitor.get_stats()
+        if metrics:
+            system_data = {
+                "chip": metrics.get("chip", "Apple M3 Max"),
+                "cpu_percent": metrics.get("cpu_percent", 0),
+                "cpu_per_core": metrics.get("cpu_per_core", []),
+                "cpu_freq_ghz": metrics.get("cpu_freq_ghz", 0),
+                "gpu_percent": metrics.get("gpu_percent", 0),
+                "gpu_freq_ghz": metrics.get("gpu_freq_ghz", 0),
+                "ram_percent": metrics.get("ram_percent", 0),
+                "ram_used_gb": metrics.get("ram_used_gb", 0),
+                "ram_total_gb": metrics.get("ram_total_gb", 0),
+                "ane_percent": metrics.get("ane_percent", 0),
+                "power_watts": metrics.get("power_watts", 0),
+                "thermal_pressure": metrics.get("thermal_pressure", "nominal"),
+                "timestamp": metrics.get("timestamp", 0),
+            }
+            # Include benchmark score if available
+            try:
+                from app.services.benchmark import get_benchmark_result
+                bench = get_benchmark_result()
+                if bench:
+                    system_data["benchmark_score"] = bench.get("score", 0)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     return {
         "status": "healthy",
         "app": "AudioEnhancerMAX by Fd",
-        "version": "1.0.0",
+        "version": "3.0.0",
         "compute": gpu_info,
         "mps_available": torch.backends.mps.is_available(),
         "gemma4_status": gemma_status,
         "gemma_model": gemma_model,
+        "system": system_data,
+    }
+
+
+@app.get("/api/acceleration")
+async def acceleration_info():
+    """Show active hardware acceleration configuration."""
+    from app.services.apple_acceleration import get_acceleration_info
+    return get_acceleration_info()
+
+
+@app.get("/api/benchmark")
+async def benchmark_results():
+    """Get benchmark results for all devices in the cluster."""
+    from app.services.benchmark import get_benchmark_result
+    from app.services.cluster_manager import cluster_manager
+
+    mac_bench = get_benchmark_result()
+    
+    # Gather worker benchmarks from cluster status
+    workers = []
+    try:
+        status = await cluster_manager.get_status()
+        for w in status.get("workers", []):
+            workers.append({
+                "name": w.get("device_model", w.get("name", "Unknown")),
+                "ip": w.get("ip", ""),
+                "status": w.get("status", "offline"),
+                "benchmark_score": w.get("benchmark_score", 0),
+                "tasks_completed": w.get("tasks_completed", 0),
+                "avg_speed": w.get("avg_speed", None),
+            })
+    except Exception:
+        pass
+
+    return {
+        "master": {
+            "name": "Mac — Master",
+            "chip": mac_bench.get("tests", {}).get("fft", {}).get("description", "") if mac_bench else "",
+            "score": mac_bench.get("score", 0) if mac_bench else 0,
+            "tests": mac_bench.get("tests", {}) if mac_bench else {},
+        },
+        "workers": workers,
     }
 
 
