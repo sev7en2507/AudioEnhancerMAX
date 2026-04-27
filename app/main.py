@@ -885,12 +885,18 @@ async def synthesize(request: TTSRequest):
         if request.clone_voice_file_id:
             clone_path = str(_find_source(request.clone_voice_file_id) or "")
 
-        audio, sr = synthesize_speech(
+        # Run TTS in thread — model loading + inference can take 30+ seconds
+        audio, sr = await asyncio.to_thread(
+            synthesize_speech,
             text=request.text, language=request.language,
             voice_id=request.voice_id, speed=request.speed,
             pitch=request.pitch, warmth=request.warmth,
             style=request.style, clone_voice_path=clone_path if clone_path else None,
         )
+
+        # Check if we got actual audio (not silent fallback)
+        if len(audio) < 100:
+            raise HTTPException(503, "TTS model not available — check server logs for installation errors")
 
         file_id = generate_file_id()
         output_path = get_output_path(file_id, "_tts", ".wav")
@@ -899,8 +905,10 @@ async def synthesize(request: TTSRequest):
         return {
             "file_id": file_id,
             "audio_url": f"/outputs/{file_id}_tts.wav",
-            "duration": len(audio) / sr,
+            "duration": round(len(audio) / sr, 2),
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"TTS failed: {str(e)}")
 

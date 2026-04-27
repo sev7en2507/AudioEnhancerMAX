@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 # Lazy-loaded model
 _tts_model = None
+_tts_init_attempts = 0
+_TTS_MAX_RETRIES = 3
 
 # Available preset voices
 PRESET_VOICES = [
@@ -34,24 +36,37 @@ PRESET_VOICES = [
 
 
 def _init_tts():
-    """Lazily initialize TTS model."""
-    global _tts_model
-    if _tts_model is None:
-        try:
-            from TTS.api import TTS
-            _tts_model = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
-            logger.info("XTTS-v2 model loaded successfully")
-        except ImportError:
-            logger.error("Coqui TTS not installed!")
-        except Exception as e:
-            logger.error(f"TTS model init failed: {e}")
-            # Try fallback
-            try:
-                from TTS.api import TTS
-                _tts_model = TTS("tts_models/en/ljspeech/tacotron2-DDC")
-                logger.info("Fallback TTS model loaded (tacotron2)")
-            except Exception:
-                logger.error("No TTS model available")
+    """Lazily initialize TTS model with retry logic."""
+    global _tts_model, _tts_init_attempts
+    if _tts_model is not None:
+        return  # Already loaded
+
+    if _tts_init_attempts >= _TTS_MAX_RETRIES:
+        return  # Give up after max retries
+
+    _tts_init_attempts += 1
+    logger.info(f"🗣️ TTS init attempt {_tts_init_attempts}/{_TTS_MAX_RETRIES}...")
+
+    try:
+        from TTS.api import TTS
+    except ImportError:
+        logger.error("❌ Coqui TTS package not installed! Run: pip install TTS")
+        return
+
+    # Try XTTS-v2 first (multilingual, high quality)
+    try:
+        _tts_model = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
+        logger.info("✅ XTTS-v2 model loaded successfully")
+        return
+    except Exception as e:
+        logger.warning(f"⚠️ XTTS-v2 failed (likely transformers incompatibility): {e}")
+
+    # Fallback: tacotron2-DDC (English only, but works with any transformers version)
+    try:
+        _tts_model = TTS("tts_models/en/ljspeech/tacotron2-DDC")
+        logger.info("✅ Fallback TTS model loaded (tacotron2-DDC, English only)")
+    except Exception as e2:
+        logger.error(f"❌ All TTS models failed: {e2}")
 
 
 def get_available_voices() -> List[dict]:
@@ -77,15 +92,20 @@ def synthesize_speech(
     _init_tts()
 
     if _tts_model is None:
-        logger.error("No TTS model available")
-        return np.zeros(1), 22050
+        raise RuntimeError(
+            f"TTS model not available after {_tts_init_attempts} attempts. "
+            f"Check that Coqui TTS is installed: pip install TTS"
+        )
 
     try:
         # Output temp file
         temp_path = tempfile.mktemp(suffix=".wav")
 
-        if clone_voice_path:
-            # Voice cloning mode
+        # Check if model is multilingual (XTTS) or single-language (tacotron2)
+        is_multilingual = hasattr(_tts_model, 'is_multi_lingual') and _tts_model.is_multi_lingual
+
+        if clone_voice_path and is_multilingual:
+            # Voice cloning mode (XTTS only)
             _tts_model.tts_to_file(
                 text=text,
                 file_path=temp_path,
@@ -93,21 +113,24 @@ def synthesize_speech(
                 language=language,
                 speed=speed,
             )
-        else:
-            # Use preset voice or default
+        elif is_multilingual:
+            # Multilingual model with language parameter
             speaker = _get_speaker_for_voice(voice_id)
-
             tts_kwargs = {
                 "text": text,
                 "file_path": temp_path,
                 "language": language,
                 "speed": speed,
             }
-
             if speaker:
                 tts_kwargs["speaker"] = speaker
-
             _tts_model.tts_to_file(**tts_kwargs)
+        else:
+            # Single-language model (tacotron2) — no language/speaker params
+            _tts_model.tts_to_file(
+                text=text,
+                file_path=temp_path,
+            )
 
         # Load the generated audio
         audio, sr = sf.read(temp_path)
