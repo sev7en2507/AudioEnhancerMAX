@@ -6,7 +6,7 @@
     <title>AudioEnhancerMAX — AI Audio Processing Suite for Apple Silicon</title>
     <meta name="description" content="Open-source, AI-powered audio processing suite. 16+ intelligent filters, Metal GPU acceleration, Edge Cluster computing. 100% local, zero cloud. Built for Apple Silicon M3 MAX.">
     <meta name="keywords" content="audio enhancer, podcast processing, AI audio, noise removal, Apple Silicon, Metal GPU, edge computing, open source">
-    <meta property="og:title" content="AudioEnhancerMAX v3.0 — AI Audio Processing Suite">
+    <meta property="og:title" content="AudioEnhancerMAX v3.5 — AI Audio Processing Suite">
     <meta property="og:description" content="Professional podcast audio processing with Metal GPU acceleration and distributed edge computing. 100% local, zero cloud.">
     <meta property="og:type" content="website">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
@@ -636,7 +636,7 @@
         <a href="#" class="nav-logo">
             <div class="nav-logo-icon">⚡</div>
             <span class="nav-logo-text">AudioEnhancerMAX</span>
-            <span class="v-badge">v3.0</span>
+            <span class="v-badge">v3.5</span>
         </a>
         <ul class="nav-links">
             <li><a href="#features">Features</a></li>
@@ -653,10 +653,10 @@
     <div class="hero-content">
         <div class="hero-badge">
             <span class="dot"></span>
-            v3.0 — Metal GPU + Edge Cluster Edition
+            v3.5 — Streaming Transcription + Real-Time Monitoring Edition
         </div>
         <h1>The AI Audio<br>Processing <span class="gradient">Powerhouse</span></h1>
-        <p class="hero-sub">Professional podcast audio processing suite with Apple Metal GPU acceleration, distributed edge computing, and 16+ intelligent AI filters. 100% local. Zero cloud. No limits.</p>
+        <p class="hero-sub">Professional podcast audio processing suite with real-time streaming transcription, Apple Metal GPU acceleration, non-blocking architecture, and 16+ intelligent AI filters. Live HW telemetry. Crash-resilient delivery. 100% local. Zero cloud. No limits.</p>
         <div class="hero-actions">
             <a href="#download" class="btn btn-primary">⬇ Download Free</a>
             <a href="https://github.com/sev7en2507/AudioEnhancerMAX" target="_blank" class="btn btn-secondary">⭐ Star on GitHub</a>
@@ -735,14 +735,38 @@
             <div class="feature-card reveal">
                 <div class="feature-icon">📊</div>
                 <h3>Real-time Monitoring</h3>
-                <p>Per-core CPU heatmap, GPU usage, power watts, ANE status. Processing dashboard with live pipeline visualization.</p>
+                <p>Per-core CPU heatmap, GPU usage, power watts, ANE status, CPU/GPU temperature (°C), thermal pressure alerts. Live pipeline visualization.</p>
                 <span class="tech-tag dsp">psutil + macmon</span>
             </div>
             <div class="feature-card reveal">
+                <div class="feature-icon">⏱️</div>
+                <h3>Adaptive Time Estimation</h3>
+                <p>3-level ETA engine that learns from real processing history. Weighted regression on past runs gives high-accuracy estimates. Per-step breakdown with confidence indicators.</p>
+                <span class="tech-tag ai">Timing Engine</span>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">♻️</div>
+                <h3>Checkpoint / Resume</h3>
+                <p>Processing saves intermediate audio after each step. If interrupted by crash or timeout, the job resumes from the last completed step. Zero wasted compute.</p>
+                <span class="tech-tag dsp">Fault Tolerant</span>
+            </div>
+            <div class="feature-card reveal">
                 <div class="feature-icon">📝</div>
-                <h3>AI Transcription</h3>
-                <p>Word-level timestamps in 99+ languages. Export to SRT, VTT, JSON. Speaker diarization with pyannote.audio on MPS.</p>
-                <span class="tech-tag ai">Whisper + pyannote</span>
+                <h3>Streaming Transcription <span style="color:var(--accent-3);font-size:0.7em">v3.5</span></h3>
+                <p>Text appears in real-time as Whisper processes. SSE streaming, segment-by-segment delivery. Auto-download in SRT, VTT, JSON, or TXT with custom filenames.</p>
+                <span class="tech-tag ai">Whisper SSE</span>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">⚡</div>
+                <h3>Non-Blocking Server <span style="color:var(--accent-3);font-size:0.7em">v3.5</span></h3>
+                <p>asyncio.to_thread() architecture keeps the server responsive during 20+ minute Whisper jobs. HW metrics, health checks, and UI always respond instantly.</p>
+                <span class="tech-tag metal">asyncio</span>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">💾</div>
+                <h3>Crash-Resilient Delivery <span style="color:var(--accent-3);font-size:0.7em">v3.5</span></h3>
+                <p>Transcripts saved to disk after each segment. If the server crashes mid-job, partial results are preserved. Resume from where you left off — zero lost work.</p>
+                <span class="tech-tag dsp">Incremental Save</span>
             </div>
         </div>
     </div>

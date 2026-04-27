@@ -533,8 +533,28 @@ const activity = {
     etaSeconds: null,
     etaReason: '',
     etaSource: 'benchmark', // 'benchmark' | 'live' | 'history'
+    etaConfidence: 'low',   // 'high' | 'medium' | 'low'
+    serverEstimate: null,   // total seconds from backend timing engine
+    perStepEstimates: {},   // per-step estimates from backend
     audioDuration: 0,       // duration of uploaded audio in seconds
 };
+
+// ── localStorage persistence for timing history ──
+function _loadTimingHistory() {
+    try {
+        const raw = localStorage.getItem('audioenhancer_timing_history');
+        if (raw) {
+            const data = JSON.parse(raw);
+            Object.assign(etaHistory, data);
+        }
+    } catch (e) { /* ignore */ }
+}
+function _saveTimingHistory() {
+    try {
+        localStorage.setItem('audioenhancer_timing_history', JSON.stringify(etaHistory));
+    } catch (e) { /* ignore */ }
+}
+_loadTimingHistory();
 
 function getAudioDuration() {
     // Use the duration stored from the upload response
@@ -702,8 +722,17 @@ function updateETADisplay() {
     }
 
     const etaStr = formatElapsed(eta);
-    const sourceIcon = activity.etaSource === 'history' ? '📊' :
-                       activity.etaSource === 'live' ? '📈' : '🧮';
+    const conf = activity.etaConfidence || 'low';
+    const sourceIcon = conf === 'high' ? '📊' :
+                       conf === 'medium' ? '📈' : '🧮';
+    const confLabel = conf === 'high' ? 'alta precisione' :
+                      conf === 'medium' ? 'precisione media' : 'stima iniziale';
+
+    // Steps counter text
+    let stepsText = '';
+    if (activity.totalSteps > 0) {
+        stepsText = ` — step ${activity.completedSteps}/${activity.totalSteps}`;
+    }
 
     // Activity bar ETA badge
     const barEta = document.getElementById('activity-bar-eta');
@@ -720,10 +749,11 @@ function updateETADisplay() {
         panelEta.style.display = '';
     }
 
-    // Reason text
+    // Reason text with confidence badge
     const reasonEl = document.getElementById('progress-eta-reason');
-    if (reasonEl && activity.etaReason) {
-        reasonEl.textContent = `${sourceIcon} ${activity.etaReason}`;
+    if (reasonEl) {
+        const reasonText = activity.etaReason || `${confLabel}${stepsText}`;
+        reasonEl.textContent = `${sourceIcon} ${reasonText}`;
         reasonEl.style.display = '';
     }
 
@@ -734,8 +764,9 @@ function updateETADisplay() {
         loadingEta.textContent = `⏳ ~${etaStr} restanti`;
         loadingEta.style.display = '';
     }
-    if (loadingReason && activity.etaReason) {
-        loadingReason.textContent = `${sourceIcon} ${activity.etaReason}`;
+    if (loadingReason) {
+        const reasonText = activity.etaReason || `${confLabel}${stepsText}`;
+        loadingReason.textContent = `${sourceIcon} ${reasonText}`;
         loadingReason.style.display = '';
     }
 }
@@ -759,6 +790,8 @@ function saveOperationTiming(operationName, elapsedSeconds) {
     // Update average audio duration
     etaHistory[operationName]._avgAudioDur =
         (etaHistory[operationName]._avgAudioDur + activity.audioDuration) / 2;
+    // Persist to localStorage
+    _saveTimingHistory();
 }
 
 function startActivity(operationName, totalSteps = 0) {
@@ -770,8 +803,9 @@ function startActivity(operationName, totalSteps = 0) {
     activity.lastProgress = 0;
     activity.lastProgressTime = null;
     activity.progressRates = [];
+    activity.serverEstimate = null;  // Reset — will be set by caller if available
 
-    // Calculate initial ETA
+    // Calculate initial ETA (fallback if no server estimate)
     activity.etaSeconds = estimateInitialETA(operationName);
 
     // Show global activity bar
@@ -785,21 +819,21 @@ function startActivity(operationName, totalSteps = 0) {
     document.getElementById('loading-text').textContent = operationName;
     document.getElementById('loading-overlay').classList.add('visible');
 
-    // Initialize processing pipeline dashboard — build immediately, update workers async
+    // ── ALWAYS start HW polling for any activity ──
+    try { startProcDashHWPolling(); } catch(e) { console.error('startProcDashHWPolling error:', e); }
+
+    // Initialize processing pipeline dashboard only for Audio Processing
     if (operationName === 'Audio Processing') {
         // Build pipeline SYNCHRONOUSLY first so WS messages can update it immediately
         try { buildProcessingPipeline(); } catch(e) { console.error('buildProcessingPipeline error:', e); }
-        try { startProcDashHWPolling(); } catch(e) { console.error('startProcDashHWPolling error:', e); }
 
         // Then async update worker nodes when cluster data arrives
         fetch('/api/cluster/status')
             .then(r => r.json())
             .then(data => {
                 _lastClusterData = data;
-                // Re-check if workers are online and update badges + worker nodes
                 if (data.online_workers > 0) {
                     _procHasEdgeWorkers = true;
-                    // Update badge labels for DSP filters
                     document.querySelectorAll('.proc-step').forEach(el => {
                         const key = el.id.replace('proc-step-', '');
                         if (DSP_FILTERS && DSP_FILTERS.has && DSP_FILTERS.has(key)) {
@@ -830,8 +864,11 @@ function startActivity(operationName, totalSteps = 0) {
         const progressElapsed = document.getElementById('progress-elapsed');
         if (progressElapsed) progressElapsed.textContent = timeStr;
 
-        // Countdown ETA (if using benchmark/initial estimate)
-        if (activity.etaSource === 'benchmark' || activity.etaSource === 'history') {
+        // Countdown ETA based on server estimate (smooth decrement)
+        if (activity.serverEstimate && activity.serverEstimate > 0) {
+            // Simple countdown: remaining = total estimate - elapsed
+            activity.etaSeconds = Math.max(0, Math.round(activity.serverEstimate - elapsed));
+        } else if (activity.etaSource === 'benchmark' || activity.etaSource === 'history') {
             const initialEta = estimateInitialETA(activity.currentOperation);
             activity.etaSeconds = Math.max(0, initialEta - elapsed);
         }
@@ -1037,6 +1074,37 @@ function connectProgressWS(fileId) {
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
 
+            // ── Handle initial estimate from backend ──
+            if (data.status === 'estimate') {
+                const totalEst = data.estimated_total_seconds || 0;
+                if (totalEst > 0) {
+                    activity.etaSeconds = Math.round(totalEst);
+                    activity.etaSource = data.eta_source || 'benchmark';
+                    activity.etaReason = data.eta_breakdown_text || '';
+                    activity.etaConfidence = data.eta_confidence || 'low';
+                    activity.serverEstimate = totalEst;
+                    // Store per-step estimates for breakdown display
+                    activity.perStepEstimates = data.per_step_estimates || {};
+                    updateETADisplay();
+                    console.log(`[ETA] Server estimate: ~${totalEst}s (${data.eta_confidence} confidence, ${data.eta_source})`);
+                }
+                return;
+            }
+
+            // ── Use server-side remaining seconds when available ──
+            if (data.estimated_remaining_seconds !== undefined && data.estimated_remaining_seconds !== null) {
+                activity.etaSeconds = Math.max(0, Math.round(data.estimated_remaining_seconds));
+                activity.etaSource = data.eta_confidence === 'high' ? 'history' : 'live';
+                activity.etaConfidence = data.eta_confidence || activity.etaConfidence;
+                // Don't overwrite reason if server didn't send one
+            }
+
+            // ── Update steps counter ──
+            if (data.steps_completed !== undefined && data.steps_total !== undefined) {
+                activity.completedSteps = data.steps_completed;
+                activity.totalSteps = data.steps_total;
+            }
+
             // Update progress visuals
             updateActivity(data.message || 'Processing...', data.progress || 0);
 
@@ -1046,7 +1114,7 @@ function connectProgressWS(fileId) {
 
             // Pipeline dashboard update
             if (data.step) {
-                console.log('[WS] step:', data.step, 'message:', data.message, 'pipelineState:', JSON.stringify(_procPipelineState));
+                console.log('[WS] step:', data.step, 'message:', data.message);
                 updatePipelineStep(data.step, data.message);
             } else if (data.message) {
                 // Infer step from message
@@ -1055,7 +1123,6 @@ function connectProgressWS(fileId) {
                     const label = FILTER_LABELS[filterKey] || '';
                     if (data.message.toLowerCase().includes(label.toLowerCase()) ||
                         data.message.toLowerCase().includes(stepKey)) {
-                        console.log('[WS] inferred step:', stepKey, 'from message:', data.message);
                         updatePipelineStep(stepKey, data.message);
                         break;
                     }
@@ -1140,15 +1207,91 @@ function applySmartPreset() {
 async function startTranscription() {
     if (!state.fileId) return;
 
+    const btn = document.getElementById('btn-transcribe');
+    btn.disabled = true;
+
+    // ─── PHASE 1: Calculate estimate BEFORE starting the task ───
+    btn.textContent = '📊 Calcolo stima...';
+
+    let estimateData = null;
+    try {
+        const audioDur = getAudioDuration();
+        const estRes = await fetch('/api/estimate/operation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ operation: 'transcribe', audio_duration: audioDur }),
+        });
+        if (estRes.ok) {
+            estimateData = await estRes.json();
+        }
+    } catch (e) { /* estimate failed, continue anyway */ }
+
+    // ─── PHASE 2: Show estimate to user with visual pause ───
+    if (estimateData && estimateData.total_seconds > 0) {
+        const rangeStr = _formatTimeRange(estimateData.total_seconds);
+        const confIcon = estimateData.confidence === 'high' ? '📊' :
+                         estimateData.confidence === 'medium' ? '📈' : '🧮';
+        const confLabel = estimateData.confidence === 'high' ? 'alta precisione' :
+                          estimateData.confidence === 'medium' ? 'precisione media' : 'stima iniziale';
+
+        btn.innerHTML = `⏱️ Tempo stimato: ~${rangeStr} (${confIcon} ${confLabel})`;
+
+        // Let user see the estimate for 2 seconds before starting
+        await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    // ─── PHASE 3: Start the actual activity ───
+    btn.textContent = '⏳ Transcribing...';
+
     startActivity('Speech-to-Text Transcription');
-    updateActivity('Loading whisper model...', 0.05);
-    document.getElementById('btn-transcribe').disabled = true;
+
+    // Set server estimate into activity state
+    if (estimateData) {
+        activity.etaSeconds = Math.round(estimateData.total_seconds);
+        activity.etaSource = estimateData.source;
+        activity.etaConfidence = estimateData.confidence;
+        activity.etaReason = estimateData.reason;
+        activity.serverEstimate = estimateData.total_seconds;
+        updateETADisplay();
+    }
+
+    updateActivity('Transcribing audio...', 0.10);
+
+    // Show output area immediately for streaming text
+    const output = document.getElementById('transcript-output');
+    output.style.display = 'block';
+    output.textContent = '';
 
     try {
         const language = document.getElementById('stt-language').value || null;
         const format = document.getElementById('stt-format').value;
 
-        const res = await fetch('/api/transcribe', {
+        // ─── Check for partial transcript from previous session ───
+        try {
+            const resumeRes = await fetch(`/api/transcribe/resume/${state.fileId}`);
+            const resumeData = await resumeRes.json();
+            if (resumeData.has_partial && resumeData.complete) {
+                // Previous transcription completed — offer to use it
+                output.textContent = resumeData.text;
+                state.transcriptData = resumeData;
+                const bc = document.getElementById('btn-copy-transcript');
+                const bd = document.getElementById('btn-download-transcript');
+                if (bc) bc.disabled = false;
+                if (bd) bd.disabled = false;
+                updateActivity('Transcription loaded from cache', 1.0);
+                stopActivity(true);
+                showToast('success', `Transcript loaded from cache (${resumeData.segments_count} segments)`);
+                return;
+            } else if (resumeData.has_partial && resumeData.segments_count > 0) {
+                output.textContent = resumeData.text + '\n\n⏳ Resuming...';
+                showToast('info', `Found ${resumeData.segments_count} cached segments, continuing...`);
+            }
+        } catch (e) { /* resume check failed, continue fresh */ }
+
+        // ─── Use SSE streaming for real-time segment delivery ───
+        const startTime = Date.now();
+
+        const response = await fetch('/api/transcribe/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1158,28 +1301,210 @@ async function startTranscription() {
             }),
         });
 
-        if (!res.ok) throw new Error('Transcription failed');
+        if (!response.ok) throw new Error('Transcription failed to start');
 
-        const data = await res.json();
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let receivedDone = false;
 
-        const output = document.getElementById('transcript-output');
-        output.style.display = 'block';
-        output.textContent = data.formatted || data.text;
+        // Accumulate segments locally — fallback if 'done' event is lost
+        let accSegments = [];
+        let accText = '';
+        let accLang = '';
 
-        document.getElementById('stt-actions').style.display = 'flex';
-        state.transcriptData = data;
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-        updateActivity('Transcription complete', 1.0);
-        addActivityStep(`Transcribed (${data.language || 'auto'})`);
-        stopActivity(true);
-        showToast('success', `Transcription complete (${data.language || 'auto'})`);
+            buffer += decoder.decode(value, { stream: true });
+
+            // Parse SSE events from buffer
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // Keep incomplete line
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const payload = line.slice(6).trim();
+
+                if (payload === '[DONE]') continue;
+
+                let event;
+                try {
+                    event = JSON.parse(payload);
+                } catch (e) {
+                    // JSON too large or malformed — skip this event
+                    continue;
+                }
+
+                if (event.type === 'segment') {
+                    // ✅ Append text incrementally — user sees results in real-time
+                    output.textContent = event.text_so_far;
+                    output.scrollTop = output.scrollHeight;
+
+                    // Accumulate for fallback
+                    accText = event.text_so_far;
+                    if (event.segment) accSegments.push(event.segment);
+
+                    updateActivity(
+                        `Transcribing... ${event.segments_count} segments (${Math.round(event.progress * 100)}%)`,
+                        event.progress * 0.95
+                    );
+
+                } else if (event.type === 'done') {
+                    receivedDone = true;
+                    accText = event.text || accText;
+                    accLang = event.language || '';
+                    if (event.segments) accSegments = event.segments;
+
+                } else if (event.type === 'error') {
+                    throw new Error(event.message);
+                }
+            }
+        }
+
+        // ── Stream ended — finalize whether or not 'done' was received ──
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+        if (accText) {
+            const formatted = _formatTranscriptClient(accSegments, accText, accLang, format);
+            output.textContent = formatted;
+
+            state.transcriptData = {
+                text: accText,
+                formatted: formatted,
+                language: accLang,
+                segments: accSegments,
+                duration: 0,
+            };
+
+            // Enable action buttons
+            const btnCopy = document.getElementById('btn-copy-transcript');
+            const btnDl = document.getElementById('btn-download-transcript');
+            if (btnCopy) btnCopy.disabled = false;
+            if (btnDl) btnDl.disabled = false;
+
+            saveOperationTiming('transcribe', parseFloat(elapsed));
+
+            // Auto-download
+            _autoDownloadTranscript(formatted, format);
+
+            updateActivity('Transcription complete', 1.0);
+            addActivityStep(`Transcribed (${accLang || 'auto'}) — ${accSegments.length} segments`);
+            stopActivity(true);
+            showToast('success', `✅ Transcript saved! (${accLang || 'auto'}) — ${elapsed}s`);
+        } else {
+            stopActivity(false);
+            showToast('error', 'Transcription produced no output');
+        }
 
     } catch (e) {
         stopActivity(false);
-        showToast('error', e.message);
+        showToast('error', e.message || 'Transcription error');
     } finally {
-        document.getElementById('btn-transcribe').disabled = false;
+        btn.disabled = false;
+        btn.textContent = '📝 Transcribe Audio';
     }
+}
+
+/**
+ * Format seconds as a human-friendly time range.
+ * UX best practice: ranges are more trustworthy than exact numbers.
+ * Examples: "20-30s", "1-2 min", "5-8 min"
+ */
+function _formatTimeRange(seconds) {
+    if (seconds < 30) {
+        const lo = Math.max(5, Math.floor(seconds * 0.7 / 5) * 5);
+        const hi = Math.ceil(seconds * 1.3 / 5) * 5;
+        return `${lo}-${hi}s`;
+    } else if (seconds < 120) {
+        const lo = Math.max(1, Math.floor(seconds * 0.8 / 30) * 0.5);
+        const hi = Math.ceil(seconds * 1.2 / 30) * 0.5;
+        return `${lo}-${hi} min`;
+    } else {
+        const lo = Math.max(1, Math.floor(seconds * 0.85 / 60));
+        const hi = Math.ceil(seconds * 1.15 / 60);
+        return `${lo}-${hi} min`;
+    }
+}
+
+/**
+ * Format transcript segments into the selected output format (client-side).
+ * Used after streaming transcription which only returns raw segments.
+ */
+function _formatTranscriptClient(segments, fullText, language, format) {
+    if (!segments || segments.length === 0) return fullText || '';
+
+    switch (format) {
+        case 'srt':
+            return segments.map((seg, i) => {
+                const start = _formatSrtTime(seg.start);
+                const end = _formatSrtTime(seg.end);
+                return `${i + 1}\n${start} --> ${end}\n${seg.text}\n`;
+            }).join('\n');
+
+        case 'vtt':
+            let vtt = 'WEBVTT\n\n';
+            vtt += segments.map((seg, i) => {
+                const start = _formatVttTime(seg.start);
+                const end = _formatVttTime(seg.end);
+                return `${start} --> ${end}\n${seg.text}\n`;
+            }).join('\n');
+            return vtt;
+
+        case 'json':
+            return JSON.stringify({
+                text: fullText,
+                language: language,
+                segments: segments,
+            }, null, 2);
+
+        case 'txt':
+        default:
+            return fullText || segments.map(s => s.text).join(' ');
+    }
+}
+
+/** Format seconds to SRT timestamp: 00:01:23,456 */
+function _formatSrtTime(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    const ms = Math.round((seconds % 1) * 1000);
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')},${String(ms).padStart(3,'0')}`;
+}
+
+/** Format seconds to VTT timestamp: 00:01:23.456 */
+function _formatVttTime(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    const ms = Math.round((seconds % 1) * 1000);
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(ms).padStart(3,'0')}`;
+}
+
+/**
+ * Auto-download the transcript file after completion.
+ * Uses the custom filename from the stt-filename input.
+ */
+function _autoDownloadTranscript(formattedText, format) {
+    const customName = (document.getElementById('stt-filename')?.value || '').trim();
+    const baseName = customName || `transcript_${state.fileId}`;
+    const mimeTypes = {
+        'srt': 'application/x-subrip',
+        'vtt': 'text/vtt',
+        'json': 'application/json',
+        'txt': 'text/plain',
+    };
+    const blob = new Blob([formattedText], { type: mimeTypes[format] || 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${baseName}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 
 function copyTranscript() {
@@ -1191,12 +1516,14 @@ function copyTranscript() {
 function downloadTranscript() {
     if (!state.transcriptData) return;
     const format = document.getElementById('stt-format').value;
+    const customName = (document.getElementById('stt-filename')?.value || '').trim();
+    const baseName = customName || `transcript_${state.fileId}`;
     const text = state.transcriptData.formatted || state.transcriptData.text;
     const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `transcript_${state.fileId}.${format}`;
+    a.download = `${baseName}.${format}`;
     a.click();
     URL.revokeObjectURL(url);
 }
@@ -1991,7 +2318,11 @@ function startProcDashHWPolling() {
 
 async function _pollHWMetrics() {
     try {
-        const health = await fetch('/api/health').then(r => r.json());
+        // Use AbortController to timeout after 3s — prevents stalling if server is busy
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const health = await fetch('/api/health', { signal: controller.signal }).then(r => r.json());
+        clearTimeout(timeoutId);
         if (health.system) {
             const cpu = health.system.cpu_percent || 0;
             const gpu = health.system.gpu_percent || 0;
@@ -2033,7 +2364,7 @@ async function _pollHWMetrics() {
                     coreHtml += `<div class="proc-core-cell" style="background:hsla(${hue},80%,50%,${opacity})" title="Core ${i}: ${Math.round(pct)}%"></div>`;
                 }
                 coreHtml += '</div>';
-                
+
                 // Build extra metrics row
                 let extrasHtml = coreHtml;
                 extrasHtml += `<div class="proc-extras-row">`;
@@ -2041,8 +2372,26 @@ async function _pollHWMetrics() {
                 if (freq > 0) extrasHtml += `<span class="proc-extra-chip">🔄 ${freq.toFixed(1)} GHz</span>`;
                 if (ane > 0) extrasHtml += `<span class="proc-extra-chip">🧠 ANE ${Math.round(ane)}%</span>`;
                 if (bench > 0) extrasHtml += `<span class="proc-extra-chip bench">🏁 ${Math.round(bench)} ops/s</span>`;
+
+                // Temperature display
+                const cpuTemp = health.system.cpu_temp_c || 0;
+                const gpuTemp = health.system.gpu_temp_c || 0;
+                const thermal = health.system.thermal_pressure || 'nominal';
+                if (cpuTemp > 0) {
+                    const tempClass = cpuTemp > 90 ? 'critical' : cpuTemp > 80 ? 'warn' : '';
+                    extrasHtml += `<span class="proc-extra-chip ${tempClass}">🌡️ CPU ${Math.round(cpuTemp)}°C</span>`;
+                }
+                if (gpuTemp > 0) {
+                    const tempClass = gpuTemp > 85 ? 'critical' : gpuTemp > 75 ? 'warn' : '';
+                    extrasHtml += `<span class="proc-extra-chip ${tempClass}">🌡️ GPU ${Math.round(gpuTemp)}°C</span>`;
+                }
+                if (thermal !== 'nominal') {
+                    const thermalIcon = thermal === 'critical' ? '🔴' : thermal === 'serious' ? '🟠' : '🟡';
+                    extrasHtml += `<span class="proc-extra-chip ${thermal}">${thermalIcon} ${thermal.toUpperCase()}</span>`;
+                }
+
                 extrasHtml += `</div>`;
-                
+
                 extrasEl.innerHTML = extrasHtml;
             }
         }

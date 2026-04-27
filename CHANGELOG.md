@@ -2,6 +2,127 @@
 
 All notable changes to AudioEnhancerMAX are documented here.
 
+## [3.5.0] — 2026-04-27 🚀 MAJOR RELEASE
+
+### ⚡ Non-Blocking Server Architecture
+- Complete `asyncio.to_thread()` refactor — server stays responsive during 20+ minute Whisper/Demucs jobs
+- `/api/health` responds instantly even under full CPU load (transcription, diarization, DSP pipeline)
+- Each DSP filter step runs in its own thread for maximum event-loop freedom
+- `AbortController` with 3s timeout on all frontend polling — no more stalled requests
+
+### 📡 Real-Time Streaming Transcription (SSE)
+- **NEW**: `POST /api/transcribe/stream` — Server-Sent Events endpoint for segment-by-segment delivery
+- Text appears in the UI within seconds of starting — no more blank screen for 20 minutes
+- Auto-download in SRT, VTT, JSON, or TXT with proper subtitle timestamps
+- Custom output filename — user chooses the file name before starting
+- Client-side SRT/VTT formatters with precise `HH:MM:SS,mmm` timestamps
+
+### 💾 Crash-Resilient Incremental Delivery
+- Transcripts saved to disk after EVERY segment (`{file_id}_transcript.json`)
+- `GET /api/transcribe/resume/{file_id}` detects partial transcripts from interrupted sessions
+- Robust frontend fallback: if the `done` SSE event is lost, accumulated segments are used automatically
+- Previous checkpoint/resume system for DSP pipeline preserved from v3.1
+
+### 🖥️ System Monitor v2 (Complete Rewrite)
+- **Dual-thread architecture**: psutil (CPU/RAM/disk/net) + macmon pipe (GPU/ANE/power/thermal)
+- `psutil.cpu_percent()` warmup at init eliminates zero-reading bug
+- macmon continuous pipe reader — non-blocking, dedicated thread
+- Atomic data merge: psutil as base dict, macmon overlay for Apple Silicon metrics
+- CPU/GPU temperature display (°C) with color-coded badges and thermal pressure indicator
+
+### ⏱️ Adaptive ETA Engine (Calibrated)
+- **FIXED**: Whisper benchmark corrected from 2.5 → 90 secs/60s audio (measured on M3 MAX)
+- 3-level estimation: static benchmarks → blended → full history regression
+- Time shown as ranges ("15-20 min") for trustworthy UX
+- "Stima → pausa → Azione" flow: estimate displayed for 2s before job starts
+- Timing history persisted to disk for cross-session learning
+
+### 🎨 Frontend & UX
+- **FIXED**: Settings and About panels were invisible — panels moved inside `<main>` container
+- **FIXED**: HW polling now active for ALL task types (transcription, diarization, TTS)
+- Always-visible Copy & Download buttons (disabled until transcription completes)
+- Transcript output area with real-time text and auto-scroll
+- Version bumped to v3.5.0 across sidebar, Settings, About, landing page, and API metadata
+
+---
+
+## [3.1.1] — 2026-04-27
+
+### 🔥 Non-Blocking Server Architecture (CRITICAL FIX)
+- **FIXED**: Server was unresponsive during heavy processing (Whisper, diarization) — all CPU-bound operations now run via `asyncio.to_thread()` so the event loop stays free
+- **FIXED**: `/api/health` endpoint now responds during active transcription/processing — HW metrics are always available
+- Each DSP filter step in `process_audio()` is individually threaded for maximum responsiveness
+
+### 📡 Streaming Transcription (NEW)
+- **NEW**: `POST /api/transcribe/stream` — Server-Sent Events (SSE) endpoint that streams segments in real-time
+- Text appears incrementally in the UI as Whisper processes each audio segment
+- No more waiting 10+ minutes with a blank screen — see results within seconds of starting
+- **NEW**: `GET /api/transcribe/resume/{file_id}` — check for partial transcripts from interrupted sessions
+
+### 💾 Incremental File Delivery (NEW)
+- Transcripts are saved to disk after EACH segment (`{file_id}_transcript.json`)
+- If the server crashes or restarts mid-transcription, the partial transcript is preserved
+- Next transcription attempt detects the existing partial and can resume or use cached result
+- **NEW**: Custom output filename field — choose the transcript filename before starting
+
+### 🖥️ System Monitor v2 (REWRITE)
+- **REWRITTEN**: Complete rewrite of `system_monitor.py` with proper dual-thread architecture:
+  - Thread 1 (psutil): CPU/RAM/disk/net metrics every 2s with proper warmup
+  - Thread 2 (macmon): Continuous pipe reader for GPU/ANE/power/thermal data
+- **FIXED**: `psutil.cpu_percent()` warmup at init — no more initial zero readings
+- **FIXED**: macmon pipe reading is now non-blocking — dedicated thread drains buffer continuously
+- Atomic data merge: psutil as base, macmon overlay for GPU/temp/power
+
+### 🎨 Frontend Fixes
+- **FIXED**: Settings and About panels were invisible — removed `style="display:none"` inline overrides that blocked CSS `.panel.active { display: block }`
+- **FIXED**: HW polling now starts for ALL activity types (transcription, diarization, TTS) — not just Audio Processing
+- **FIXED**: Health fetch uses `AbortController` with 3s timeout — polling doesn't stall on slow responses
+- **FIXED**: ETA countdown uses server estimate as anchor — smooth decrement instead of recalculating each tick
+- **NEW**: "Stima → pausa → Azione" flow — estimate shown for 2s before transcription begins
+- **NEW**: Time ranges ("2-3 min") instead of exact seconds for more trustworthy UX
+- Version bumped to v3.1.1 across sidebar, Settings, About, and API metadata
+
+## [3.1.0] — 2026-04-27
+
+### ⏱️ Adaptive Timing Engine (NEW)
+- **NEW**: `timing_engine.py` — 3-level adaptive ETA system that learns from real processing times
+  - **Level 1**: Static benchmarks calibrated for M3 MAX (first run fallback)
+  - **Level 2**: Per-step live progress with server-side remaining time via WebSocket
+  - **Level 3**: Persistent history (JSON on disk) — weighted linear regression on past runs for high-accuracy estimates
+- Per-step breakdown: each filter reports its estimated and actual time
+- Confidence indicator: 📊 high (history-based), 📈 medium (blended), 🧮 low (benchmark only)
+- API: `POST /api/estimate` (adaptive), `POST /api/estimate/operation`, `GET /api/estimate/history`
+
+### ♻️ Checkpoint/Resume (NEW)
+- **NEW**: Processing pipeline saves intermediate audio after each step to `{file_id}_checkpoints/`
+- If a job is interrupted (crash, timeout, network error), resubmitting the same file resumes from the last completed step
+- Checkpoint metadata (`meta.json`) tracks completed steps and last audio state
+- Checkpoints are automatically cleaned up on successful job completion
+
+### 📊 System Monitor Fix
+- **FIXED**: CPU/GPU/RAM stats showing zeros — fixed `psutil.cpu_percent()` warmup and macmon JSON parsing
+- **FIXED**: macmon `gpu_usage` is `[freq_mhz, pct_float]` array, not a single float — now parsed correctly
+- **NEW**: CPU and GPU temperature display (°C) in processing dashboard HW panel
+- **NEW**: Thermal pressure indicator (nominal/moderate/serious/critical) derived from CPU temp
+- **NEW**: Color-coded temperature badges: green (normal), yellow (>80°C), red (>90°C, pulsing)
+- Memory data now sourced from macmon for unified memory accuracy on Apple Silicon
+
+### 🎯 Frontend ETA Improvements
+- WebSocket handler now consumes server-side `estimated_remaining_seconds`, `eta_confidence`, `per_step_estimates`
+- Initial "anchor" estimate displayed immediately when processing starts (before any step runs)
+- Step counter: "step 3/8" shown alongside ETA
+- Confidence badge in ETA reason text: "📊 alta precisione" / "📈 precisione media" / "🧮 stima iniziale"
+- Transcription pre-fetches adaptive estimate from `/api/estimate/operation` before starting
+- `etaHistory` now persisted to `localStorage` — survives page refresh for instant re-estimates
+
+### 🔧 Backend
+- Version bumped to 3.1.0 (FastAPI + health endpoint + frontend)
+- Health API enriched: `cpu_temp_c`, `gpu_temp_c`, `swap_used_gb`
+- `ProgressTracker` enhanced: `send_estimate()` for initial anchor, ETA fields in all progress payloads
+- New files: `app/services/timing_engine.py`
+
+---
+
 ## [3.0.0] — 2026-04-20
 
 ### ⬡ Metal GPU Acceleration

@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="AudioEnhancerMAX by Fd",
     description="Professional podcast audio processing suite — Apple Silicon Metal GPU + Edge Cluster computing",
-    version="3.0.0",
+    version="3.5.0",
 )
 
 app.add_middleware(
@@ -92,9 +92,11 @@ async def startup_services():
 
     from app.services.system_monitor import system_monitor
     from app.services.cluster_manager import cluster_manager
+    from app.services.timing_engine import timing_engine
     system_monitor.start()
     cluster_manager.start()
     logger.info("🚀 System monitor + Cluster manager started")
+    logger.info(f"⏱️ Timing engine ready (history: {len(timing_engine._history.get('filter_timings', {}))} filters tracked)")
 
     # Run DSP benchmark in background (doesn't block startup)
     import threading
@@ -217,17 +219,18 @@ GROUP_LOAD_COSTS = {
 
 
 # ══════════════════════════════════════════════════════════
-# Routes — Estimation
+# Routes — Estimation (Adaptive Timing Engine)
 # ══════════════════════════════════════════════════════════
 
 @app.post("/api/estimate")
 async def estimate_processing_time(request: ProcessingRequest):
-    """Estimate processing time for given options and audio duration."""
+    """Adaptive estimate using real historical data + benchmark fallback."""
+    from app.services.timing_engine import timing_engine
     opts = request.options
     file_id = request.file_id
 
     # Try to get actual duration
-    duration = 60.0  # default
+    duration = 60.0
     source = _find_source(file_id)
     if source:
         try:
@@ -236,35 +239,40 @@ async def estimate_processing_time(request: ProcessingRequest):
         except Exception:
             pass
 
-    scale = duration / 60.0
-    total = 3.0  # base I/O overhead
-    breakdown = []
-    groups_counted = set()
+    # Collect active filter keys
     opts_dict = opts.model_dump()
+    active_steps = [k for k in FILTER_BENCHMARKS if opts_dict.get(k)]
 
-    for key, bench in FILTER_BENCHMARKS.items():
-        if opts_dict.get(key):
-            cost = bench["seconds_per_60s"] * scale
-            group = bench["group"]
-
-            # Add model load cost once per group
-            if group not in groups_counted and GROUP_LOAD_COSTS.get(group, 0) > 0:
-                cost += GROUP_LOAD_COSTS[group]
-                groups_counted.add(group)
-
-            total += cost
-            breakdown.append({
-                "filter": key,
-                "estimated_seconds": round(cost, 1),
-                "group": group,
-            })
+    estimate = timing_engine.get_adaptive_estimate(active_steps, duration)
 
     return {
-        "estimated_seconds": round(total),
-        "audio_duration": round(duration, 1),
-        "active_filters": len(breakdown),
-        "breakdown": breakdown,
+        "estimated_seconds": estimate["total_seconds"],
+        "audio_duration": estimate["audio_duration"],
+        "active_filters": len(active_steps),
+        "confidence": estimate["confidence"],
+        "source": estimate["source"],
+        "breakdown_text": estimate["breakdown_text"],
+        "per_step": estimate["per_step"],
     }
+
+
+class OperationEstimateRequest(BaseModel):
+    operation: str
+    audio_duration: float = 60.0
+
+
+@app.post("/api/estimate/operation")
+async def estimate_operation_time(request: OperationEstimateRequest):
+    """Adaptive estimate for non-filter operations (transcribe, diarize, tts)."""
+    from app.services.timing_engine import timing_engine
+    return timing_engine.estimate_operation(request.operation, request.audio_duration)
+
+
+@app.get("/api/estimate/history")
+async def get_estimate_history():
+    """Return stored timing history summary."""
+    from app.services.timing_engine import timing_engine
+    return timing_engine.get_history_summary()
 
 
 # ══════════════════════════════════════════════════════════
@@ -336,6 +344,9 @@ async def get_audio(file_id: str, version: str = "original"):
 
 @app.post("/api/process")
 async def process_audio(request: ProcessingRequest):
+    import time as _time
+    from app.services.timing_engine import timing_engine
+
     file_id = request.file_id
     options = request.options
 
@@ -344,32 +355,81 @@ async def process_audio(request: ProcessingRequest):
         raise HTTPException(404, "Source file not found")
 
     try:
-        audio, sr = load_audio(source_path)
+        audio_duration_sec = 60.0
+        try:
+            info = get_audio_info(source_path)
+            audio_duration_sec = info.get("duration", 60.0)
+        except Exception:
+            pass
+
+        # ── Checkpoint/Resume: check for partial work ──
+        checkpoint_dir = OUTPUT_DIR / f"{file_id}_checkpoints"
+        checkpoint_meta_path = checkpoint_dir / "meta.json"
+        completed_steps_set = set()
+        resume_step = None
+
+        if checkpoint_dir.exists() and checkpoint_meta_path.exists():
+            import json as _json
+            try:
+                with open(checkpoint_meta_path) as f:
+                    ckpt = _json.load(f)
+                completed_steps_set = set(ckpt.get("completed_steps", []))
+                resume_step = ckpt.get("last_step")
+                # Load audio from last checkpoint
+                last_audio_path = checkpoint_dir / f"{resume_step}.wav"
+                if last_audio_path.exists() and completed_steps_set:
+                    audio, sr = load_audio(last_audio_path)
+                    logger.info(f"♻️ Resuming job {file_id}: {len(completed_steps_set)} steps already done, loading from checkpoint '{resume_step}'")
+                    await progress_tracker.send_progress(
+                        file_id, "resume", 0.05,
+                        f"♻️ Ripresa dal checkpoint: {len(completed_steps_set)} step già completati"
+                    )
+                else:
+                    audio, sr = load_audio(source_path)
+            except Exception as e:
+                logger.warning(f"Checkpoint load failed, starting fresh: {e}")
+                audio, sr = load_audio(source_path)
+        else:
+            audio, sr = load_audio(source_path)
 
         await progress_tracker.send_progress(file_id, "loading", 0.05, "Audio loaded")
 
-        steps = _count_steps(options)
-        if steps == 0:
+        total_steps = _count_steps(options)
+        if total_steps == 0:
             raise HTTPException(400, "No processing options selected")
 
-        # ── v2.0: Dynamic Parameter Tuning ──
-        # Analyze audio and dynamically adjust filter strengths
-        # using Gemma 4 (or heuristic fallback) based on actual audio characteristics.
+        # ── Build ordered list of active steps ──
+        opts_dict = options.model_dump()
+        STEP_ORDER = [
+            "remove_noise", "wind_noise_remover", "buzzing_noise_remover",
+            "static_noise_remover", "reverb_echo_remover", "remove_mouth_sounds",
+            "remove_filler_words", "eliminate_hesitations", "remove_stuttering",
+            "remove_breaths", "remove_long_silences", "keep_music",
+            "auto_eq", "studio_sound", "frequency_restoration", "normalize",
+        ]
+        active_steps = [s for s in STEP_ORDER if opts_dict.get(s)]
+
+        # ── Timing Engine: start job + get adaptive estimate ──
+        job_id = file_id
+        estimates = timing_engine.start_job(job_id, audio_duration_sec, active_steps)
+        await progress_tracker.send_estimate(file_id, estimates)
+        logger.info(
+            f"⏱️ Estimate for {file_id}: ~{estimates['total_seconds']}s "
+            f"({estimates['confidence']} confidence, {estimates['source']})"
+        )
+
+        # ── Dynamic Parameter Tuning ──
         try:
             from app.services.smart_mode import get_dynamic_parameters
-            opts_dict = options.model_dump()
-            dynamic_params = get_dynamic_parameters(audio, sr, opts_dict)
-
+            dynamic_params = await asyncio.to_thread(get_dynamic_parameters, audio, sr, opts_dict)
             if dynamic_params:
                 logger.info(f"v2.0 Dynamic tuning active: {len(dynamic_params)} filters adjusted")
-                # Apply dynamic strength overrides
                 if "remove_noise" in dynamic_params and hasattr(options, 'noise_reduction_strength'):
                     options.noise_reduction_strength = dynamic_params["remove_noise"]["strength"]
                 if "remove_breaths" in dynamic_params and hasattr(options, 'breath_reduction_strength'):
                     options.breath_reduction_strength = dynamic_params["remove_breaths"]["strength"]
                 if "remove_mouth_sounds" in dynamic_params and hasattr(options, 'mouth_sound_sensitivity'):
                     options.mouth_sound_sensitivity = dynamic_params["remove_mouth_sounds"]["strength"]
-
                 await progress_tracker.send_progress(
                     file_id, "tuning", 0.08,
                     f"🧠 Dynamic tuning: {len(dynamic_params)} filters optimized for this audio"
@@ -377,147 +437,207 @@ async def process_audio(request: ProcessingRequest):
         except Exception as e:
             logger.warning(f"Dynamic tuning skipped: {e}")
 
-        current = [0]
-        async def step(name, msg):
-            current[0] += 1
-            await progress_tracker.send_progress(file_id, name, current[0]/steps, msg)
-
-        # ── v2.0: Distributed Edge Processing ──
-        # If edge workers are online, offload DSP filters to them in parallel
+        # ── Distributed Edge Processing ──
+        distributed_filters = set()
         try:
             from app.services.cluster_manager import cluster_manager
-            opts_dict = options.model_dump()
-
             if cluster_manager.can_distribute(opts_dict):
                 n_workers = len(cluster_manager.online_workers)
                 await progress_tracker.send_progress(
                     file_id, "cluster", 0.08,
                     f"🌐 Distributing DSP to {n_workers} edge worker(s)..."
                 )
-
-                # Build filter dict for offloadable filters only
                 from app.services.cluster_manager import OFFLOADABLE_FILTERS
-                offload_opts = {}
-                for key in OFFLOADABLE_FILTERS:
-                    if opts_dict.get(key):
-                        offload_opts[key] = True
-
+                offload_opts = {k: True for k in OFFLOADABLE_FILTERS if opts_dict.get(k)}
                 if offload_opts:
                     audio = await cluster_manager.process_distributed(
                         audio, sr, offload_opts,
                         progress_callback=lambda name, pct, msg: progress_tracker.send_progress(file_id, name, pct, msg)
                     )
-
-                    # Mark offloaded DSP filters as done so the local chain skips them
                     distributed_filters = set(offload_opts.keys())
                     logger.info(f"🌐 Distributed processing done for: {distributed_filters}")
-
                     await progress_tracker.send_progress(
                         file_id, "cluster_done", 0.35,
                         f"🌐 Edge processing complete — {len(distributed_filters)} filters distributed"
                     )
-                else:
-                    distributed_filters = set()
-            else:
-                distributed_filters = set()
         except Exception as e:
             logger.warning(f"Distributed processing skipped: {e}")
-            distributed_filters = set()
+
+        # ── Helper: run a step with timing + checkpoint ──
+        current_step_idx = [0]
+
+        def _save_checkpoint(step_name, audio_data, sample_rate, completed_list):
+            """Save intermediate audio and metadata to checkpoint dir."""
+            import json as _json
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            save_audio(audio_data, sample_rate, checkpoint_dir / f"{step_name}.wav")
+            with open(checkpoint_meta_path, "w") as f:
+                _json.dump({
+                    "file_id": file_id,
+                    "completed_steps": completed_list,
+                    "last_step": step_name,
+                    "audio_duration": audio_duration_sec,
+                    "sample_rate": sample_rate,
+                }, f)
+
+        async def run_step(step_name, msg, process_fn):
+            """Execute a step with timing, progress, and checkpoint."""
+            nonlocal audio, sr
+            # Skip if already done (checkpoint resume) or distributed
+            if step_name in completed_steps_set:
+                current_step_idx[0] += 1
+                logger.info(f"⏩ Skipping '{step_name}' (checkpoint)")
+                return
+            if step_name in distributed_filters:
+                return
+
+            step_est = estimates.get("per_step", {}).get(step_name, {}).get("estimated_seconds", 5.0)
+            timing_engine.start_step(job_id, step_name)
+
+            await progress_tracker.send_progress(
+                file_id, step_name, current_step_idx[0] / total_steps,
+                f"⏳ {msg}...",
+                step_estimate_seconds=step_est,
+                steps_completed=current_step_idx[0],
+                steps_total=total_steps,
+                eta_confidence=estimates.get("confidence"),
+            )
+
+            # Execute the actual processing — in thread to keep server responsive
+            result = await asyncio.to_thread(process_fn, audio, sr)
+            if isinstance(result, tuple):
+                audio, sr = result
+            else:
+                audio = result
+
+            elapsed = timing_engine.end_step(job_id, step_name)
+            current_step_idx[0] += 1
+
+            # Mark model group as loaded for future estimates
+            from app.services.timing_engine import STATIC_BENCHMARKS
+            bench = STATIC_BENCHMARKS.get(step_name, {})
+            if bench.get("model_load", 0) > 0:
+                timing_engine.mark_group_loaded(bench["group"])
+
+            # Checkpoint: save intermediate audio
+            completed_list = [s for s in STEP_ORDER if s in completed_steps_set or s == step_name]
+            completed_steps_set.add(step_name)
+            _save_checkpoint(step_name, audio, sr, list(completed_steps_set))
+
+            # Get live ETA from timing engine
+            live = timing_engine.get_live_eta(job_id)
+            remaining = live["remaining_seconds"] if live else None
+
+            await progress_tracker.send_progress(
+                file_id, step_name, current_step_idx[0] / total_steps,
+                f"✓ {msg} ({elapsed:.1f}s)",
+                estimated_remaining_seconds=remaining,
+                steps_completed=current_step_idx[0],
+                steps_total=total_steps,
+                eta_confidence=estimates.get("confidence"),
+            )
 
         # ── Processing Chain (order matters!) ──
-        # Filters already handled by distributed workers are skipped.
 
-        if options.remove_noise and "remove_noise" not in distributed_filters:
-            from app.services.noise_removal import remove_noise
-            audio = remove_noise(audio, sr, options.noise_reduction_strength)
-            await step("remove_noise", "✓ Noise removal complete")
+        if options.remove_noise:
+            from app.services.noise_removal import remove_noise as _remove_noise
+            await run_step("remove_noise", "Noise removal complete",
+                           lambda a, s: _remove_noise(a, s, options.noise_reduction_strength))
 
-        if options.wind_noise_remover and "wind_noise_remover" not in distributed_filters:
+        if options.wind_noise_remover:
             from app.services.specific_noise import remove_wind_noise
-            audio = remove_wind_noise(audio, sr)
-            await step("wind", "✓ Wind noise removed")
+            await run_step("wind_noise_remover", "Wind noise removed",
+                           lambda a, s: remove_wind_noise(a, s))
 
-        if options.buzzing_noise_remover and "buzzing_noise_remover" not in distributed_filters:
+        if options.buzzing_noise_remover:
             from app.services.specific_noise import remove_buzzing_noise
-            audio = remove_buzzing_noise(audio, sr, options.buzz_frequency_hz)
-            await step("buzz", "✓ Buzzing removed")
+            await run_step("buzzing_noise_remover", "Buzzing removed",
+                           lambda a, s: remove_buzzing_noise(a, s, options.buzz_frequency_hz))
 
-        if options.static_noise_remover and "static_noise_remover" not in distributed_filters:
+        if options.static_noise_remover:
             from app.services.specific_noise import remove_static_noise
-            audio = remove_static_noise(audio, sr)
-            await step("static", "✓ Static noise removed")
+            await run_step("static_noise_remover", "Static noise removed",
+                           lambda a, s: remove_static_noise(a, s))
 
-        if options.reverb_echo_remover and "reverb_echo_remover" not in distributed_filters:
+        if options.reverb_echo_remover:
             from app.services.specific_noise import remove_reverb_echo
-            audio = remove_reverb_echo(audio, sr)
-            await step("reverb", "✓ Reverb/echo removed")
+            await run_step("reverb_echo_remover", "Reverb/echo removed",
+                           lambda a, s: remove_reverb_echo(a, s))
 
-        if options.remove_mouth_sounds and "remove_mouth_sounds" not in distributed_filters:
+        if options.remove_mouth_sounds:
             from app.services.speech_cleanup import remove_mouth_sounds
-            audio = remove_mouth_sounds(audio, sr, options.mouth_sound_sensitivity)
-            await step("mouth", "✓ Mouth sounds removed")
+            await run_step("remove_mouth_sounds", "Mouth sounds removed",
+                           lambda a, s: remove_mouth_sounds(a, s, options.mouth_sound_sensitivity))
 
         if options.remove_filler_words:
             from app.services.speech_cleanup import remove_filler_words
-            audio = remove_filler_words(audio, sr, options.custom_filler_words)
-            await step("fillers", "✓ Filler words removed")
+            await run_step("remove_filler_words", "Filler words removed",
+                           lambda a, s: remove_filler_words(a, s, options.custom_filler_words))
 
         if options.eliminate_hesitations:
             from app.services.speech_cleanup import eliminate_hesitations
-            audio = eliminate_hesitations(audio, sr)
-            await step("hesitations", "✓ Hesitations eliminated")
+            await run_step("eliminate_hesitations", "Hesitations eliminated",
+                           lambda a, s: eliminate_hesitations(a, s))
 
         if options.remove_stuttering:
             from app.services.speech_cleanup import remove_stuttering
-            audio = remove_stuttering(audio, sr)
-            await step("stutter", "✓ Stuttering removed")
+            await run_step("remove_stuttering", "Stuttering removed",
+                           lambda a, s: remove_stuttering(a, s))
 
-        if options.remove_breaths and "remove_breaths" not in distributed_filters:
+        if options.remove_breaths:
             from app.services.speech_cleanup import remove_breaths
-            audio = remove_breaths(audio, sr, options.breath_reduction_strength)
-            await step("breaths", "✓ Breaths removed")
+            await run_step("remove_breaths", "Breaths removed",
+                           lambda a, s: remove_breaths(a, s, options.breath_reduction_strength))
 
-        if options.remove_long_silences and "remove_long_silences" not in distributed_filters:
-            from app.services.silence_removal import remove_long_silences, mute_segments, detect_silences
+        if options.remove_long_silences:
+            from app.services.silence_removal import remove_long_silences as _rm_silence, mute_segments, detect_silences
             if options.mute_segments:
-                silences = detect_silences(audio, sr, options.silence_threshold_db, options.min_silence_duration_ms)
-                audio = mute_segments(audio, sr, silences)
+                await run_step("remove_long_silences", "Silences muted",
+                               lambda a, s: mute_segments(a, s, detect_silences(a, s, options.silence_threshold_db, options.min_silence_duration_ms)))
             else:
-                audio = remove_long_silences(audio, sr, options.silence_threshold_db, options.min_silence_duration_ms)
-            await step("silence", "✓ Silences processed")
+                await run_step("remove_long_silences", "Silences removed",
+                               lambda a, s: _rm_silence(a, s, options.silence_threshold_db, options.min_silence_duration_ms))
 
         if options.keep_music:
             from app.services.enhancement import keep_music
-            audio = keep_music(audio, sr)
-            await step("music", "✓ Music preserved")
+            await run_step("keep_music", "Music preserved",
+                           lambda a, s: keep_music(a, s))
 
-        if options.auto_eq and "auto_eq" not in distributed_filters:
+        if options.auto_eq:
             from app.services.enhancement import apply_auto_eq
-            audio = apply_auto_eq(audio, sr)
-            await step("eq", "✓ AutoEQ applied")
+            await run_step("auto_eq", "AutoEQ applied",
+                           lambda a, s: apply_auto_eq(a, s))
 
-        if options.studio_sound and "studio_sound" not in distributed_filters:
+        if options.studio_sound:
             from app.services.enhancement import apply_studio_sound
-            audio = apply_studio_sound(audio, sr)
-            await step("studio", "✓ Studio sound applied")
+            await run_step("studio_sound", "Studio sound applied",
+                           lambda a, s: apply_studio_sound(a, s))
 
-        if options.frequency_restoration and "frequency_restoration" not in distributed_filters:
+        if options.frequency_restoration:
             from app.services.super_resolution import restore_frequencies
-            audio, sr = restore_frequencies(audio, sr, options.target_sample_rate)
-            await step("superres", "✓ Frequency restoration complete")
+            await run_step("frequency_restoration", "Frequency restoration complete",
+                           lambda a, s: restore_frequencies(a, s, options.target_sample_rate))
 
-        if options.normalize and "normalize" not in distributed_filters:
+        if options.normalize:
             from app.services.enhancement import normalize_volume
-            audio = normalize_volume(audio, sr, options.target_loudness_lufs)
-            await step("normalize", "✓ Volume normalized")
+            await run_step("normalize", "Volume normalized",
+                           lambda a, s: normalize_volume(a, s, options.target_loudness_lufs))
 
-        # ── Save output ──
+        # ── Finalize: save output ──
+        timing_engine.end_job(job_id)
+
         fmt = options.output_format.value
         output_path = get_output_path(file_id, "_processed", f".{fmt}")
         save_audio(audio, sr, output_path, format=fmt)
 
         waveform = generate_waveform_data(audio, num_points=500)
         result_url = f"/outputs/{file_id}_processed.{fmt}"
+
+        # Clean up checkpoints on success
+        import shutil
+        if checkpoint_dir.exists():
+            shutil.rmtree(checkpoint_dir, ignore_errors=True)
+            logger.info(f"🧹 Checkpoints cleaned for {file_id}")
 
         await progress_tracker.send_complete(file_id, result_url)
 
@@ -535,6 +655,10 @@ async def process_audio(request: ProcessingRequest):
         raise
     except Exception as e:
         logger.error(f"Processing failed: {e}", exc_info=True)
+        try:
+            timing_engine.end_job(file_id)
+        except Exception:
+            pass
         await progress_tracker.send_error(file_id, str(e))
         raise HTTPException(500, f"Processing failed: {str(e)}")
 
@@ -583,34 +707,163 @@ async def get_editing_suggestions(file_id: str):
 
 @app.post("/api/transcribe")
 async def transcribe_audio(request: TranscriptionRequest):
+    """Non-blocking transcription — runs in thread to keep server responsive."""
     source_path = _find_source(request.file_id)
     if not source_path:
         raise HTTPException(404, "File not found")
 
     try:
-        audio, sr = load_audio(source_path)
-        from app.services.transcription import transcribe, format_as_srt, format_as_vtt, format_as_json
-
-        result = transcribe(audio, sr, language=request.language)
-
-        formatters = {
-            TranscriptFormat.SRT: lambda: format_as_srt(result["segments"]),
-            TranscriptFormat.VTT: lambda: format_as_vtt(result["segments"]),
-            TranscriptFormat.JSON: lambda: format_as_json(result["segments"], result["text"], result["language"]),
-            TranscriptFormat.TXT: lambda: result["text"],
-        }
-        formatted = formatters.get(request.output_format, lambda: result["text"])()
-
-        return {
-            "text": result["text"],
-            "language": result["language"],
-            "duration": result["duration"],
-            "segments": result["segments"],
-            "formatted": formatted,
-            "format": request.output_format.value,
-        }
+        result = await asyncio.to_thread(
+            _transcribe_sync, source_path, request.language, request.output_format
+        )
+        return result
     except Exception as e:
         raise HTTPException(500, f"Transcription failed: {str(e)}")
+
+
+def _transcribe_sync(source_path, language, output_format):
+    """Synchronous transcription worker — runs in a separate thread."""
+    import time as _time
+    from app.services.timing_engine import timing_engine
+
+    audio, sr = load_audio(source_path)
+    audio_duration = len(audio) / sr
+    from app.services.transcription import transcribe, format_as_srt, format_as_vtt, format_as_json
+
+    t0 = _time.monotonic()
+    result = transcribe(audio, sr, language=language)
+    elapsed = _time.monotonic() - t0
+
+    # Record timing for future estimates
+    timing_engine.record_operation("transcribe", audio_duration, elapsed)
+    timing_engine.mark_group_loaded("whisper")
+    logger.info(f"⏱️ Transcription took {elapsed:.1f}s for {audio_duration:.1f}s audio")
+
+    formatters = {
+        TranscriptFormat.SRT: lambda: format_as_srt(result["segments"]),
+        TranscriptFormat.VTT: lambda: format_as_vtt(result["segments"]),
+        TranscriptFormat.JSON: lambda: format_as_json(result["segments"], result["text"], result["language"]),
+        TranscriptFormat.TXT: lambda: result["text"],
+    }
+    formatted = formatters.get(output_format, lambda: result["text"])()
+
+    return {
+        "text": result["text"],
+        "language": result["language"],
+        "duration": result["duration"],
+        "segments": result["segments"],
+        "formatted": formatted,
+        "format": output_format.value,
+        "processing_time": round(elapsed, 2),
+    }
+
+
+# ══════════════════════════════════════════════════════════
+# Routes — Streaming Transcription (SSE)
+# ══════════════════════════════════════════════════════════
+
+@app.post("/api/transcribe/stream")
+async def transcribe_audio_stream(request: TranscriptionRequest):
+    """
+    Streaming transcription via Server-Sent Events.
+    Sends segments in real-time as Whisper processes them.
+    Saves incrementally to disk for crash resilience.
+    """
+    source_path = _find_source(request.file_id)
+    if not source_path:
+        raise HTTPException(404, "File not found")
+
+    from starlette.responses import StreamingResponse
+
+    async def event_stream():
+        import time as _time
+        import json
+        from app.services.timing_engine import timing_engine
+        from app.services.transcription import transcribe_streaming
+
+        audio, sr = load_audio(source_path)
+        audio_duration = len(audio) / sr
+
+        # Incremental output file
+        output_path = OUTPUT_DIR / f"{request.file_id}_transcript.json"
+
+        t0 = _time.monotonic()
+
+        # Run the generator in a thread to not block the event loop
+        import queue
+        result_queue = queue.Queue()
+
+        def _run_streaming():
+            try:
+                for event in transcribe_streaming(
+                    audio, sr,
+                    language=request.language,
+                    output_path=output_path,
+                ):
+                    result_queue.put(event)
+            except Exception as e:
+                result_queue.put({"type": "error", "message": str(e)})
+            finally:
+                result_queue.put(None)  # Sentinel
+
+        import threading
+        worker = threading.Thread(target=_run_streaming, daemon=True)
+        worker.start()
+
+        while True:
+            # Poll queue without blocking — allow other async tasks
+            try:
+                event = await asyncio.to_thread(result_queue.get, timeout=0.5)
+            except Exception:
+                continue
+
+            if event is None:
+                break
+
+            # Send SSE event
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+            if event.get("type") == "done":
+                elapsed = _time.monotonic() - t0
+                timing_engine.record_operation("transcribe", audio_duration, elapsed)
+                timing_engine.mark_group_loaded("whisper")
+                logger.info(f"⏱️ Streaming transcription took {elapsed:.1f}s for {audio_duration:.1f}s audio")
+                break
+            elif event.get("type") == "error":
+                break
+
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/api/transcribe/resume/{file_id}")
+async def check_transcript_resume(file_id: str):
+    """Check if a partial transcript exists from a previous interrupted session."""
+    import json
+    output_path = OUTPUT_DIR / f"{file_id}_transcript.json"
+    if output_path.exists():
+        try:
+            with open(output_path) as f:
+                data = json.load(f)
+            return {
+                "has_partial": True,
+                "complete": data.get("complete", False),
+                "segments_count": data.get("segments_count", 0),
+                "text": data.get("text", ""),
+                "language": data.get("language", ""),
+            }
+        except Exception:
+            pass
+    return {"has_partial": False}
 
 
 # ══════════════════════════════════════════════════════════
@@ -658,30 +911,40 @@ async def synthesize(request: TTSRequest):
 
 @app.post("/api/diarize")
 async def diarize_audio(request: DiarizationRequest):
+    """Non-blocking diarization — runs in thread to keep server responsive."""
     source_path = _find_source(request.file_id)
     if not source_path:
         raise HTTPException(404, "File not found")
 
     try:
-        audio, sr = load_audio(source_path)
-        from app.services.diarization import diarize, get_speaker_stats
-
-        segments = diarize(
-            audio, sr,
-            num_speakers=request.num_speakers,
-            min_speakers=request.min_speakers,
-            max_speakers=request.max_speakers,
+        result = await asyncio.to_thread(
+            _diarize_sync, source_path, request.file_id,
+            request.num_speakers, request.min_speakers, request.max_speakers
         )
-        stats = get_speaker_stats(segments)
-
-        return {
-            "file_id": request.file_id,
-            "segments": segments,
-            "speaker_stats": stats,
-            "total_speakers": len(stats),
-        }
+        return result
     except Exception as e:
         raise HTTPException(500, f"Diarization failed: {str(e)}")
+
+
+def _diarize_sync(source_path, file_id, num_speakers, min_speakers, max_speakers):
+    """Synchronous diarization worker — runs in a separate thread."""
+    audio, sr = load_audio(source_path)
+    from app.services.diarization import diarize, get_speaker_stats
+
+    segments = diarize(
+        audio, sr,
+        num_speakers=num_speakers,
+        min_speakers=min_speakers,
+        max_speakers=max_speakers,
+    )
+    stats = get_speaker_stats(segments)
+
+    return {
+        "file_id": file_id,
+        "segments": segments,
+        "speaker_stats": stats,
+        "total_speakers": len(stats),
+    }
 
 
 # ══════════════════════════════════════════════════════════
@@ -901,9 +1164,12 @@ async def health():
                 "ram_percent": metrics.get("ram_percent", 0),
                 "ram_used_gb": metrics.get("ram_used_gb", 0),
                 "ram_total_gb": metrics.get("ram_total_gb", 0),
+                "swap_used_gb": metrics.get("swap_used_gb", 0),
                 "ane_percent": metrics.get("ane_percent", 0),
                 "power_watts": metrics.get("power_watts", 0),
                 "thermal_pressure": metrics.get("thermal_pressure", "nominal"),
+                "cpu_temp_c": metrics.get("cpu_temp_c", 0),
+                "gpu_temp_c": metrics.get("gpu_temp_c", 0),
                 "timestamp": metrics.get("timestamp", 0),
             }
             # Include benchmark score if available
@@ -920,7 +1186,7 @@ async def health():
     return {
         "status": "healthy",
         "app": "AudioEnhancerMAX by Fd",
-        "version": "3.0.0",
+        "version": "3.5.0",
         "compute": gpu_info,
         "mps_available": torch.backends.mps.is_available(),
         "gemma4_status": gemma_status,

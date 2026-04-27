@@ -2088,6 +2088,28 @@ select:focus {
     color: #6ee7b7;
 }
 
+.proc-extra-chip.warn {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+}
+
+.proc-extra-chip.critical {
+    background: rgba(239, 68, 68, 0.15);
+    color: #fca5a5;
+    animation: pulse-text 1.5s infinite;
+}
+
+.proc-extra-chip.moderate {
+    background: rgba(245, 158, 11, 0.1);
+    color: #fbbf24;
+}
+
+.proc-extra-chip.serious {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+    font-weight: 700;
+}
+
 /* ── Pipeline steps ── */
 .proc-pipeline {
     display: flex;

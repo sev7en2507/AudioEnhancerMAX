@@ -91,7 +91,7 @@
     </div>
 
     <div class="sidebar-version">
-        <span>v3.0.0</span> · <span id="sidebar-chip">M3 Max</span>
+        <span>v3.5</span> · <span id="sidebar-chip">M3 Max</span>
     </div>
 </nav>
 
@@ -488,13 +488,19 @@
                     </select>
                 </div>
             </div>
+            <div class="tts-control-group" style="margin-bottom: 12px;">
+                <label>Output Filename</label>
+                <input type="text" id="stt-filename" class="setting-input" placeholder="transcript" style="width:100%; min-width:0;">
+            </div>
             <button class="btn btn-primary w-full mb-16" id="btn-transcribe" onclick="startTranscription()" disabled>
                 📝 Transcribe Audio
             </button>
-            <div class="transcript-output" id="transcript-output" style="display:none"></div>
-            <div class="mt-12 flex gap-8" id="stt-actions" style="display:none">
-                <button class="btn btn-sm btn-secondary" onclick="copyTranscript()">📋 Copy</button>
-                <button class="btn btn-sm btn-secondary" onclick="downloadTranscript()">💾 Download</button>
+            <div class="transcript-output" id="transcript-output" style="min-height:60px; background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:var(--radius-md); padding:12px; font-size:0.82rem; color:var(--text-secondary); white-space:pre-wrap; max-height:300px; overflow-y:auto; margin-bottom:12px;">
+                <em style="opacity:0.4">Il testo trascritto apparirà qui in tempo reale...</em>
+            </div>
+            <div class="mt-12 flex gap-8" id="stt-actions" style="display:flex; gap:8px;">
+                <button class="btn btn-sm btn-secondary" onclick="copyTranscript()" id="btn-copy-transcript" disabled>📋 Copy</button>
+                <button class="btn btn-sm btn-primary" onclick="downloadTranscript()" id="btn-download-transcript" disabled>💾 Download File</button>
             </div>
         </div>
     </div>
@@ -688,7 +694,7 @@
         </div>
     </div>
 
-</main>
+
 
 <!-- ─── Download Bar ─── -->
 <div class="download-bar" id="download-bar">
@@ -719,10 +725,10 @@
 <div class="toast-container" id="toast-container"></div>
 
 <!-- ═══════════════ SETTINGS PANEL ═══════════════ -->
-<div class="panel" id="settings-panel" style="display:none">
+<div class="panel" id="settings-panel">
     <div class="panel-header">
         <h2>⚙️ Settings</h2>
-        <p class="panel-subtitle">Configure AudioEnhancerMAX v3.0</p>
+        <p class="panel-subtitle">Configure AudioEnhancerMAX v3.5</p>
     </div>
     <div class="panel-body settings-grid">
         <div class="settings-group">
@@ -813,16 +819,16 @@
 </div>
 
 <!-- ═══════════════ ABOUT PANEL ═══════════════ -->
-<div class="panel" id="about-panel" style="display:none">
+<div class="panel" id="about-panel">
     <div class="panel-header">
         <h2>ℹ️ About AudioEnhancerMAX</h2>
-        <p class="panel-subtitle">v3.0.0 — Edge Cluster + Metal GPU Edition</p>
+        <p class="panel-subtitle">v3.5 — Streaming Transcription + Real-Time Monitoring Edition</p>
     </div>
     <div class="panel-body about-content">
         <div class="about-hero">
             <div class="about-logo">⚡</div>
             <div>
-                <h3>AudioEnhancerMAX <span class="about-version">v3.0</span></h3>
+                <h3>AudioEnhancerMAX <span class="about-version">v3.5</span></h3>
                 <p>Professional AI-powered audio processing suite</p>
                 <p class="about-by">Created by <strong>Fd</strong> — Optimized for Apple Silicon</p>
             </div>
@@ -865,7 +871,45 @@
         </div>
 
         <div class="about-section">
-            <h3>🆕 What's New in v3.0</h3>
+            <h3>🆕 What's New in v3.5</h3>
+            <div class="about-changelog">
+                <div class="changelog-item">
+                    <span class="changelog-tag new">NEW</span>
+                    <span>Streaming transcription — see text appear in real-time as Whisper processes</span>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag new">NEW</span>
+                    <span>Non-blocking server — HW metrics stay live during heavy processing</span>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag new">NEW</span>
+                    <span>Incremental file saving — crash-resilient transcripts saved segment-by-segment</span>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag new">NEW</span>
+                    <span>Adaptive ETA engine — pre-task estimates with confidence badges</span>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag new">NEW</span>
+                    <span>Custom output filename — choose your transcript filename before processing</span>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag improved">FIX</span>
+                    <span>Settings & About panels now render correctly (CSS specificity fix)</span>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag improved">FIX</span>
+                    <span>System monitor v2 — separate threads for psutil + macmon, proper warmup</span>
+                </div>
+                <div class="changelog-item">
+                    <span class="changelog-tag improved">FIX</span>
+                    <span>HW polling active for ALL task types (not just Audio Processing)</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="about-section">
+            <h3>📋 v3.0 Features</h3>
             <div class="about-changelog">
                 <div class="changelog-item">
                     <span class="changelog-tag new">NEW</span>
@@ -931,6 +975,8 @@
         </div>
     </div>
 </div>
+
+</main>
 
 <!-- ─── Processing Dashboard Overlay ─── -->
 <div class="loading-overlay" id="loading-overlay">

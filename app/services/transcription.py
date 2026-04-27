@@ -172,6 +172,150 @@ def _transcribe_faster_whisper(
     }
 
 
+def transcribe_streaming(
+    audio: np.ndarray,
+    sr: int,
+    language: Optional[str] = None,
+    model_size: str = "medium",
+    output_path: Optional[Path] = None,
+):
+    """
+    Streaming transcription generator — yields segments incrementally.
+    Each yield is a dict: {"type": "segment"|"progress"|"done", ...}
+    Saves partial results to output_path after each segment for crash resilience.
+    """
+    _init_model(model_size)
+
+    if _model is None:
+        yield {"type": "error", "message": "Transcription model not available"}
+        return
+
+    # Save temp file for model input
+    temp_path = Path(tempfile.mktemp(suffix=".wav"))
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    sf.write(str(temp_path), audio.astype(np.float32), sr)
+
+    audio_duration = len(audio) / sr
+
+    try:
+        logger.info(f"Starting streaming transcription ({audio_duration:.1f}s, {sr}Hz)...")
+
+        segments_iter, info = _model.transcribe(
+            str(temp_path),
+            language=language,
+            word_timestamps=True,
+            vad_filter=True,
+            vad_parameters=dict(
+                min_silence_duration_ms=500,
+                speech_pad_ms=400,
+                threshold=0.35,
+            ),
+            beam_size=5,
+        )
+
+        all_segments = []
+        all_text = []
+
+        for segment in segments_iter:
+            seg_data = {
+                "start": round(segment.start, 2),
+                "end": round(segment.end, 2),
+                "text": segment.text.strip(),
+                "confidence": round(segment.avg_logprob, 3),
+            }
+            if segment.words:
+                seg_data["words"] = [
+                    {"word": w.word.strip(), "start": round(w.start, 2),
+                     "end": round(w.end, 2), "probability": round(w.probability, 3)}
+                    for w in segment.words
+                ]
+
+            all_segments.append(seg_data)
+            all_text.append(segment.text.strip())
+
+            # Progress based on audio position
+            progress = min(0.99, segment.end / audio_duration) if audio_duration > 0 else 0
+
+            # Save incrementally to disk
+            if output_path:
+                _save_partial_transcript(output_path, all_segments, all_text, info.language, audio_duration)
+
+            # Yield segment for real-time display
+            yield {
+                "type": "segment",
+                "segment": seg_data,
+                "progress": round(progress, 3),
+                "segments_count": len(all_segments),
+                "text_so_far": " ".join(all_text),
+            }
+
+        # If VAD filtered everything, retry without VAD
+        if not all_text:
+            logger.warning("VAD filtered all audio — retrying without VAD filter")
+            segments_iter2, info = _model.transcribe(
+                str(temp_path), language=language,
+                word_timestamps=True, vad_filter=False, beam_size=5,
+            )
+            for segment in segments_iter2:
+                seg_data = {
+                    "start": round(segment.start, 2),
+                    "end": round(segment.end, 2),
+                    "text": segment.text.strip(),
+                    "confidence": round(segment.avg_logprob, 3),
+                }
+                all_segments.append(seg_data)
+                all_text.append(segment.text.strip())
+
+                if output_path:
+                    _save_partial_transcript(output_path, all_segments, all_text, info.language, audio_duration)
+
+                yield {
+                    "type": "segment",
+                    "segment": seg_data,
+                    "progress": round(min(0.99, segment.end / audio_duration), 3),
+                    "segments_count": len(all_segments),
+                    "text_so_far": " ".join(all_text),
+                }
+
+        # Final save
+        if output_path:
+            _save_partial_transcript(output_path, all_segments, all_text, info.language, audio_duration, complete=True)
+
+        yield {
+            "type": "done",
+            "text": " ".join(all_text),
+            "language": info.language,
+            "segments": all_segments,
+            "duration": audio_duration,
+            "segments_count": len(all_segments),
+        }
+
+    except Exception as e:
+        logger.error(f"Streaming transcription failed: {e}")
+        yield {"type": "error", "message": str(e)}
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def _save_partial_transcript(path: Path, segments, text_parts, language, duration, complete=False):
+    """Save partial transcript to disk for crash resilience."""
+    try:
+        data = {
+            "text": " ".join(text_parts),
+            "language": language,
+            "duration": duration,
+            "segments": segments,
+            "segments_count": len(segments),
+            "complete": complete,
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.warning(f"Failed to save partial transcript: {e}")
+
+
 def _transcribe_openai_whisper(
     audio_path: Path,
     language: Optional[str] = None,
