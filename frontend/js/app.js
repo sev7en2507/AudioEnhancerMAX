@@ -1557,8 +1557,12 @@ async function synthesizeSpeech() {
         return;
     }
 
-    startActivity('Speech Synthesis (TTS)');
-    updateActivity('Generating speech...', 0.1);
+    const voiceId = document.getElementById('tts-voice').value;
+    // Derive language from voice_id prefix (it_giuseppe → it, en_aria → en)
+    const language = voiceId.split('_')[0] || 'en';
+
+    startActivity('Speech Synthesis (Neural TTS)');
+    updateActivity('Generating speech with Edge Neural TTS...', 0.1);
 
     try {
         const res = await fetch('/api/tts/synthesize', {
@@ -1566,7 +1570,8 @@ async function synthesizeSpeech() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 text: text,
-                language: document.getElementById('tts-language').value,
+                language: language,
+                voice_id: voiceId,
                 style: document.getElementById('tts-style').value,
                 speed: parseFloat(document.getElementById('tts-speed').value) / 100,
                 pitch: parseFloat(document.getElementById('tts-pitch').value) / 100,
@@ -1575,7 +1580,10 @@ async function synthesizeSpeech() {
             }),
         });
 
-        if (!res.ok) throw new Error('Speech synthesis failed');
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Speech synthesis failed');
+        }
 
         const data = await res.json();
         const audio = document.getElementById('tts-audio');
@@ -1583,7 +1591,7 @@ async function synthesizeSpeech() {
         document.getElementById('tts-result').style.display = 'block';
 
         stopActivity(true);
-        showToast('success', `Speech generated (${data.duration.toFixed(1)}s)`);
+        showToast('success', `🗣️ Speech generated (${data.duration.toFixed(1)}s)`);
 
     } catch (e) {
         stopActivity(false);

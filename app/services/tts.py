@@ -1,7 +1,10 @@
 """
 AudioEnhancerMAX by Fd — Text-to-Speech Service
-Uses Coqui XTTS-v2 for high-quality, multilingual TTS with voice cloning.
+Uses Microsoft Edge Neural TTS for expressive, natural-sounding speech.
+Supports 400+ voices in 100+ languages with zero API keys.
+Fallback: Coqui tacotron2 for fully offline operation.
 """
+import asyncio
 import os
 import numpy as np
 from typing import Optional, List
@@ -10,68 +13,119 @@ import tempfile
 import logging
 import soundfile as sf
 
-# Auto-accept Coqui TTS license (non-commercial use)
-os.environ["COQUI_TOS_AGREED"] = "1"
-
 logger = logging.getLogger(__name__)
 
-# Lazy-loaded model
-_tts_model = None
-_tts_init_attempts = 0
-_TTS_MAX_RETRIES = 3
+# ── Voice Registry ──
+# Map friendly IDs to edge-tts voice names
+VOICE_MAP = {
+    # Italian
+    "it_giuseppe":  "it-IT-GiuseppeMultilingualNeural",
+    "it_diego":     "it-IT-DiegoNeural",
+    "it_isabella":  "it-IT-IsabellaNeural",
+    "it_elsa":      "it-IT-ElsaNeural",
+    # English
+    "en_aria":      "en-US-AriaNeural",
+    "en_guy":       "en-US-GuyNeural",
+    "en_jenny":     "en-US-JennyNeural",
+    "en_davis":     "en-US-DavisNeural",
+    "en_sonia":     "en-GB-SoniaNeural",
+    # Spanish
+    "es_elena":     "es-AR-ElenaNeural",
+    "es_tomas":     "es-AR-TomasNeural",
+    # French
+    "fr_denise":    "fr-FR-DeniseNeural",
+    "fr_henri":     "fr-FR-HenriNeural",
+    # German
+    "de_katja":     "de-DE-KatjaNeural",
+    "de_conrad":    "de-DE-ConradNeural",
+}
 
-# Available preset voices
+# Language → default voice fallback
+LANG_DEFAULTS = {
+    "it": "it-IT-GiuseppeMultilingualNeural",
+    "en": "en-US-AriaNeural",
+    "es": "es-AR-ElenaNeural",
+    "fr": "fr-FR-DeniseNeural",
+    "de": "de-DE-KatjaNeural",
+    "pt": "pt-BR-FranciscaNeural",
+    "ja": "ja-JP-NanamiNeural",
+    "zh": "zh-CN-XiaoxiaoNeural",
+    "ko": "ko-KR-SunHiNeural",
+    "ru": "ru-RU-SvetlanaNeural",
+    "ar": "ar-SA-ZariyahNeural",
+    "hi": "hi-IN-SwaraNeural",
+}
+
 PRESET_VOICES = [
-    {"id": "default", "name": "Default Male", "language": "en", "gender": "male",
-     "description": "Clear, professional male voice"},
-    {"id": "female_1", "name": "Sofia", "language": "en", "gender": "female",
-     "description": "Warm, expressive female voice"},
-    {"id": "male_2", "name": "Marcus", "language": "en", "gender": "male",
-     "description": "Deep, authoritative male voice"},
-    {"id": "female_2", "name": "Elena", "language": "it", "gender": "female",
-     "description": "Natural Italian female voice"},
-    {"id": "male_3", "name": "Alessandro", "language": "it", "gender": "male",
-     "description": "Professional Italian male voice"},
+    {"id": "it_giuseppe", "name": "Giuseppe 🇮🇹", "language": "it", "gender": "male",
+     "description": "Natural Italian multilingual voice — warm and expressive"},
+    {"id": "it_isabella", "name": "Isabella 🇮🇹", "language": "it", "gender": "female",
+     "description": "Clear Italian female voice — professional tone"},
+    {"id": "it_diego", "name": "Diego 🇮🇹", "language": "it", "gender": "male",
+     "description": "Deep Italian male voice — authoritative"},
+    {"id": "en_aria", "name": "Aria 🇺🇸", "language": "en", "gender": "female",
+     "description": "Expressive American female — versatile and natural"},
+    {"id": "en_guy", "name": "Guy 🇺🇸", "language": "en", "gender": "male",
+     "description": "Clear American male — podcast-quality narration"},
+    {"id": "en_davis", "name": "Davis 🇺🇸", "language": "en", "gender": "male",
+     "description": "Deep American male — warm and conversational"},
+    {"id": "en_sonia", "name": "Sonia 🇬🇧", "language": "en", "gender": "female",
+     "description": "British female — elegant and articulate"},
+    {"id": "es_elena", "name": "Elena 🇪🇸", "language": "es", "gender": "female",
+     "description": "Natural Spanish female voice"},
+    {"id": "fr_denise", "name": "Denise 🇫🇷", "language": "fr", "gender": "female",
+     "description": "Warm French female voice"},
+    {"id": "de_katja", "name": "Katja 🇩🇪", "language": "de", "gender": "female",
+     "description": "Professional German female voice"},
 ]
-
-
-def _init_tts():
-    """Lazily initialize TTS model with retry logic."""
-    global _tts_model, _tts_init_attempts
-    if _tts_model is not None:
-        return  # Already loaded
-
-    if _tts_init_attempts >= _TTS_MAX_RETRIES:
-        return  # Give up after max retries
-
-    _tts_init_attempts += 1
-    logger.info(f"🗣️ TTS init attempt {_tts_init_attempts}/{_TTS_MAX_RETRIES}...")
-
-    try:
-        from TTS.api import TTS
-    except ImportError:
-        logger.error("❌ Coqui TTS package not installed! Run: pip install TTS")
-        return
-
-    # Try XTTS-v2 first (multilingual, high quality)
-    try:
-        _tts_model = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
-        logger.info("✅ XTTS-v2 model loaded successfully")
-        return
-    except Exception as e:
-        logger.warning(f"⚠️ XTTS-v2 failed (likely transformers incompatibility): {e}")
-
-    # Fallback: tacotron2-DDC (English only, but works with any transformers version)
-    try:
-        _tts_model = TTS("tts_models/en/ljspeech/tacotron2-DDC")
-        logger.info("✅ Fallback TTS model loaded (tacotron2-DDC, English only)")
-    except Exception as e2:
-        logger.error(f"❌ All TTS models failed: {e2}")
 
 
 def get_available_voices() -> List[dict]:
     """Get list of available voices."""
     return PRESET_VOICES
+
+
+def _resolve_voice(voice_id: str, language: str) -> str:
+    """Resolve voice ID to edge-tts voice name."""
+    # Direct match in voice map
+    if voice_id in VOICE_MAP:
+        return VOICE_MAP[voice_id]
+
+    # Language fallback
+    lang_code = language[:2].lower() if language else "en"
+    return LANG_DEFAULTS.get(lang_code, "en-US-AriaNeural")
+
+
+def _style_to_rate_pitch(style: str, speed: float, pitch: float):
+    """Convert style + speed + pitch to edge-tts rate/pitch strings."""
+    # Speed: 1.0 = normal, 0.5 = slow, 2.0 = fast
+    rate_pct = int((speed - 1.0) * 100)
+
+    # Pitch: 1.0 = normal, range ~0.5 to 1.5
+    pitch_hz = int((pitch - 1.0) * 50)
+
+    # Style adjustments
+    if style == "energetic":
+        rate_pct += 10
+        pitch_hz += 5
+    elif style == "calm":
+        rate_pct -= 10
+        pitch_hz -= 3
+    elif style == "expressive":
+        rate_pct += 5
+        pitch_hz += 8
+
+    rate_str = f"+{rate_pct}%" if rate_pct >= 0 else f"{rate_pct}%"
+    pitch_str = f"+{pitch_hz}Hz" if pitch_hz >= 0 else f"{pitch_hz}Hz"
+
+    return rate_str, pitch_str
+
+
+async def _synthesize_edge(text: str, voice: str, rate: str, pitch: str, output_path: str):
+    """Generate speech using edge-tts (async)."""
+    import edge_tts
+    communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
+    await communicate.save(output_path)
 
 
 def synthesize_speech(
@@ -85,110 +139,75 @@ def synthesize_speech(
     clone_voice_path: Optional[str] = None,
 ) -> tuple:
     """
-    Generate speech from text.
-
-    Returns (audio_array, sample_rate)
+    Generate speech from text using Microsoft Edge Neural TTS.
+    Returns (audio_array, sample_rate).
     """
-    _init_tts()
+    voice = _resolve_voice(voice_id, language)
+    rate_str, pitch_str = _style_to_rate_pitch(style, speed, pitch)
 
-    if _tts_model is None:
-        raise RuntimeError(
-            f"TTS model not available after {_tts_init_attempts} attempts. "
-            f"Check that Coqui TTS is installed: pip install TTS"
-        )
+    temp_path = tempfile.mktemp(suffix=".mp3")
 
     try:
-        # Output temp file
-        temp_path = tempfile.mktemp(suffix=".wav")
-
-        # Check if model is multilingual (XTTS) or single-language (tacotron2)
-        is_multilingual = hasattr(_tts_model, 'is_multi_lingual') and _tts_model.is_multi_lingual
-
-        if clone_voice_path and is_multilingual:
-            # Voice cloning mode (XTTS only)
-            _tts_model.tts_to_file(
-                text=text,
-                file_path=temp_path,
-                speaker_wav=clone_voice_path,
-                language=language,
-                speed=speed,
-            )
-        elif is_multilingual:
-            # Multilingual model with language parameter
-            speaker = _get_speaker_for_voice(voice_id)
-            tts_kwargs = {
-                "text": text,
-                "file_path": temp_path,
-                "language": language,
-                "speed": speed,
-            }
-            if speaker:
-                tts_kwargs["speaker"] = speaker
-            _tts_model.tts_to_file(**tts_kwargs)
-        else:
-            # Single-language model (tacotron2) — no language/speaker params
-            _tts_model.tts_to_file(
-                text=text,
-                file_path=temp_path,
-            )
+        # edge-tts is async — run in a new event loop (we're called from a thread)
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_synthesize_edge(text, voice, rate_str, pitch_str, temp_path))
+        finally:
+            loop.close()
 
         # Load the generated audio
         audio, sr = sf.read(temp_path)
         Path(temp_path).unlink(missing_ok=True)
 
-        # Apply post-processing for pitch and warmth
-        audio = _apply_voice_adjustments(audio, sr, pitch, warmth, style)
+        logger.info(f"✅ Edge TTS: {voice} — {len(audio)/sr:.1f}s generated")
+
+        # Apply warmth post-processing
+        audio = _apply_warmth(audio, sr, warmth, style)
 
         return audio, sr
 
     except Exception as e:
-        logger.error(f"TTS synthesis failed: {e}")
-        return np.zeros(1), 22050
+        logger.error(f"⚠️ Edge TTS failed: {e}")
+        Path(temp_path).unlink(missing_ok=True)
+
+        # Fallback to Coqui tacotron2 (offline)
+        logger.info("Trying offline fallback (Coqui tacotron2)...")
+        return _synthesize_coqui_fallback(text)
 
 
-def _get_speaker_for_voice(voice_id: str) -> Optional[str]:
-    """Map voice ID to TTS model speaker."""
-    # XTTS-v2 uses reference audio for speaker, not speaker IDs
-    # For preset voices, we'd have reference audio files
-    # For now, return None to use default
-    return None
+def _synthesize_coqui_fallback(text: str) -> tuple:
+    """Offline fallback using Coqui tacotron2-DDC."""
+    try:
+        os.environ["COQUI_TOS_AGREED"] = "1"
+        from TTS.api import TTS
+        model = TTS("tts_models/en/ljspeech/tacotron2-DDC")
+        temp_path = tempfile.mktemp(suffix=".wav")
+        model.tts_to_file(text=text, file_path=temp_path)
+        audio, sr = sf.read(temp_path)
+        Path(temp_path).unlink(missing_ok=True)
+        logger.info(f"✅ Coqui fallback: {len(audio)/sr:.1f}s generated (English only)")
+        return audio, sr
+    except Exception as e:
+        logger.error(f"❌ All TTS engines failed: {e}")
+        raise RuntimeError(f"No TTS engine available: {e}")
 
 
-def _apply_voice_adjustments(
-    audio: np.ndarray,
-    sr: int,
-    pitch: float = 1.0,
-    warmth: float = 0.5,
-    style: str = "neutral",
-) -> np.ndarray:
-    """Apply pitch shifting, warmth, and style adjustments."""
-    import librosa
-
-    # Pitch adjustment
-    if abs(pitch - 1.0) > 0.05:
-        n_steps = (pitch - 1.0) * 12  # Convert ratio to semitones
-        audio = librosa.effects.pitch_shift(
-            y=audio, sr=sr, n_steps=n_steps
-        )
-
-    # Warmth: low-shelf boost / high-shelf cut
+def _apply_warmth(audio: np.ndarray, sr: int, warmth: float = 0.5, style: str = "neutral") -> np.ndarray:
+    """Apply warmth and style EQ adjustments via pedalboard."""
     try:
         import pedalboard as pb
 
         effects = []
 
         if warmth > 0.5:
-            # Warmer: boost lows, cut highs
-            boost = (warmth - 0.5) * 6  # 0-3dB boost
+            boost = (warmth - 0.5) * 6
             effects.append(pb.LowShelfFilter(cutoff_frequency_hz=200, gain_db=boost))
             effects.append(pb.HighShelfFilter(cutoff_frequency_hz=6000, gain_db=-boost * 0.5))
         elif warmth < 0.5:
-            # Cooler/brighter: cut lows, boost highs
             cut = (0.5 - warmth) * 6
             effects.append(pb.LowShelfFilter(cutoff_frequency_hz=200, gain_db=-cut))
             effects.append(pb.HighShelfFilter(cutoff_frequency_hz=6000, gain_db=cut * 0.5))
 
-        # Style adjustments
         if style == "energetic":
             effects.extend([
                 pb.Compressor(threshold_db=-15, ratio=2.5, attack_ms=5, release_ms=50),
@@ -198,11 +217,6 @@ def _apply_voice_adjustments(
             effects.extend([
                 pb.Compressor(threshold_db=-25, ratio=1.5, attack_ms=20, release_ms=200),
                 pb.LowpassFilter(cutoff_frequency_hz=12000),
-            ])
-        elif style == "expressive":
-            effects.extend([
-                pb.Compressor(threshold_db=-18, ratio=2.0, attack_ms=10, release_ms=100),
-                pb.PeakFilter(cutoff_frequency_hz=2500, gain_db=2.0, q=0.7),
             ])
 
         if effects:
@@ -214,7 +228,4 @@ def _apply_voice_adjustments(
     except ImportError:
         pass
 
-    # Final safety clip
-    audio = np.clip(audio, -1.0, 1.0)
-
-    return audio
+    return np.clip(audio, -1.0, 1.0)
