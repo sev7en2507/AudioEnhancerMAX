@@ -1550,34 +1550,120 @@ async function handleCloneUpload(event) {
     }
 }
 
-async function synthesizeSpeech() {
+// ── Expressive Mode helpers ──
+
+function toggleExpressiveMode(enabled) {
+    const previewBtn = document.getElementById('btn-preview-rewrite');
+    const previewArea = document.getElementById('tts-rewrite-preview');
+    const genBtn = document.getElementById('btn-generate-speech');
+
+    if (enabled) {
+        previewBtn.style.display = 'inline-flex';
+        genBtn.textContent = '✨ Generate Expressive Speech';
+    } else {
+        previewBtn.style.display = 'none';
+        previewArea.style.display = 'none';
+        genBtn.textContent = '🗣️ Generate Speech';
+    }
+}
+
+async function previewRewrite() {
     const text = document.getElementById('tts-text').value.trim();
+    if (!text) {
+        showToast('warning', 'Enter text first');
+        return;
+    }
+
+    const voiceId = document.getElementById('tts-voice').value;
+    const language = voiceId.startsWith('kokoro') ? 'en' : (voiceId.split('_')[0] || 'en');
+    const style = document.getElementById('tts-style').value;
+
+    const previewBtn = document.getElementById('btn-preview-rewrite');
+    previewBtn.textContent = '⏳ Rewriting...';
+    previewBtn.disabled = true;
+
+    try {
+        const res = await fetch('/api/tts/rewrite', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, language, style }),
+        });
+
+        if (!res.ok) throw new Error('Rewrite failed');
+
+        const data = await res.json();
+        const previewArea = document.getElementById('tts-rewrite-preview');
+        const previewText = document.getElementById('tts-rewrite-text');
+
+        previewText.textContent = data.rewritten;
+        previewArea.style.display = 'block';
+
+        if (data.changed) {
+            showToast('success', '✨ Text rewritten for expressive delivery');
+        } else {
+            showToast('info', 'Gemma unavailable — original text will be used');
+        }
+    } catch (e) {
+        showToast('error', e.message);
+    } finally {
+        previewBtn.textContent = '👁️ Preview';
+        previewBtn.disabled = false;
+    }
+}
+
+async function synthesizeSpeech() {
+    const isExpressive = document.getElementById('tts-expressive')?.checked || false;
+
+    // If expressive mode is on and there's rewritten text in the preview, use it
+    const previewText = document.getElementById('tts-rewrite-text');
+    const rewrittenVisible = document.getElementById('tts-rewrite-preview')?.style.display !== 'none';
+    let text;
+
+    if (isExpressive && rewrittenVisible && previewText?.textContent?.trim()) {
+        // Use the (possibly user-edited) rewritten text directly
+        text = previewText.textContent.trim();
+    } else {
+        text = document.getElementById('tts-text').value.trim();
+    }
+
     if (!text) {
         showToast('warning', 'Please enter text to synthesize');
         return;
     }
 
     const voiceId = document.getElementById('tts-voice').value;
-    // Derive language from voice_id prefix (it_giuseppe → it, en_aria → en)
-    const language = voiceId.split('_')[0] || 'en';
+    const isKokoro = voiceId.startsWith('kokoro');
+    const language = isKokoro ? 'en' : (voiceId.split('_')[0] || 'en');
+    const engineLabel = isKokoro ? 'Kokoro Local AI' : 'Edge Neural TTS';
 
-    startActivity('Speech Synthesis (Neural TTS)');
-    updateActivity('Generating speech with Edge Neural TTS...', 0.1);
+    const label = isExpressive ? `Expressive Speech (${engineLabel})` : `Speech Synthesis (${engineLabel})`;
+    startActivity(label);
+
+    if (isExpressive && !rewrittenVisible) {
+        updateActivity('✨ Gemma is rewriting your text...', 0.05);
+    } else {
+        updateActivity(`Generating speech with ${engineLabel}...`, 0.1);
+    }
 
     try {
+        const payload = {
+            text: text,
+            language: language,
+            voice_id: voiceId,
+            style: document.getElementById('tts-style').value,
+            speed: parseFloat(document.getElementById('tts-speed').value) / 100,
+            pitch: parseFloat(document.getElementById('tts-pitch').value) / 100,
+            warmth: parseFloat(document.getElementById('tts-warmth').value) / 100,
+            clone_voice_file_id: state.cloneVoiceFileId || null,
+            // Only send expressive=true if we haven't already rewritten in the preview
+            expressive: isExpressive && !rewrittenVisible,
+            engine: isKokoro ? 'kokoro' : 'edge',
+        };
+
         const res = await fetch('/api/tts/synthesize', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                text: text,
-                language: language,
-                voice_id: voiceId,
-                style: document.getElementById('tts-style').value,
-                speed: parseFloat(document.getElementById('tts-speed').value) / 100,
-                pitch: parseFloat(document.getElementById('tts-pitch').value) / 100,
-                warmth: parseFloat(document.getElementById('tts-warmth').value) / 100,
-                clone_voice_file_id: state.cloneVoiceFileId || null,
-            }),
+            body: JSON.stringify(payload),
         });
 
         if (!res.ok) {
@@ -1590,8 +1676,28 @@ async function synthesizeSpeech() {
         audio.src = data.audio_url;
         document.getElementById('tts-result').style.display = 'block';
 
+        // Show engine badge
+        const badge = document.getElementById('tts-engine-badge');
+        if (badge) {
+            const parts = [];
+            parts.push(`Engine: ${data.engine === 'kokoro' ? '🤖 Kokoro Local' : '☁️ Edge Neural'}`);
+            if (data.expressive) parts.push('✨ Expressive');
+            parts.push(`${data.duration.toFixed(1)}s`);
+            badge.textContent = parts.join(' · ');
+            badge.style.display = 'block';
+        }
+
+        // Show rewritten text if Gemma was used server-side
+        if (data.rewritten_text && !rewrittenVisible) {
+            const previewArea = document.getElementById('tts-rewrite-preview');
+            const previewEl = document.getElementById('tts-rewrite-text');
+            previewEl.textContent = data.rewritten_text;
+            previewArea.style.display = 'block';
+        }
+
         stopActivity(true);
-        showToast('success', `🗣️ Speech generated (${data.duration.toFixed(1)}s)`);
+        const emoji = data.expressive ? '✨' : '🗣️';
+        showToast('success', `${emoji} Speech generated (${data.duration.toFixed(1)}s)`);
 
     } catch (e) {
         stopActivity(false);

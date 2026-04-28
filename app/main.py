@@ -24,7 +24,7 @@ from app.config import (
 from app.models.schemas import (
     ProcessingOptions, ProcessingRequest,
     TranscriptionRequest, TranscriptFormat,
-    TTSRequest, FileInfo, ContentType
+    TTSRequest, TTSRewriteRequest, FileInfo, ContentType
 )
 from app.utils.audio_io import (
     generate_file_id, get_upload_path, get_output_path,
@@ -885,18 +885,19 @@ async def synthesize(request: TTSRequest):
         if request.clone_voice_file_id:
             clone_path = str(_find_source(request.clone_voice_file_id) or "")
 
-        # Run TTS in thread — model loading + inference can take 30+ seconds
-        audio, sr = await asyncio.to_thread(
+        # Run TTS in thread — model loading + inference + Gemma rewrite can take 30+ seconds
+        audio, sr, metadata = await asyncio.to_thread(
             synthesize_speech,
             text=request.text, language=request.language,
             voice_id=request.voice_id, speed=request.speed,
             pitch=request.pitch, warmth=request.warmth,
             style=request.style, clone_voice_path=clone_path if clone_path else None,
+            expressive=request.expressive, engine=request.engine,
         )
 
-        # Check if we got actual audio (not silent fallback)
+        # Check if we got actual audio
         if len(audio) < 100:
-            raise HTTPException(503, "TTS model not available — check server logs for installation errors")
+            raise HTTPException(503, "TTS model not available — check server logs")
 
         file_id = generate_file_id()
         output_path = get_output_path(file_id, "_tts", ".wav")
@@ -906,11 +907,31 @@ async def synthesize(request: TTSRequest):
             "file_id": file_id,
             "audio_url": f"/outputs/{file_id}_tts.wav",
             "duration": round(len(audio) / sr, 2),
+            "engine": metadata.get("engine", "edge"),
+            "expressive": metadata.get("expressive", False),
+            "rewritten_text": metadata.get("rewritten_text"),
         }
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(500, f"TTS failed: {str(e)}")
+
+
+@app.post("/api/tts/rewrite")
+async def rewrite_text(request: TTSRewriteRequest):
+    """Preview Gemma's expressive rewrite of the input text."""
+    try:
+        from app.services.tts import rewrite_expressive
+        rewritten = await asyncio.to_thread(
+            rewrite_expressive, request.text, request.language, request.style
+        )
+        return {
+            "original": request.text,
+            "rewritten": rewritten,
+            "changed": rewritten != request.text,
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Rewrite failed: {str(e)}")
 
 
 # ══════════════════════════════════════════════════════════
